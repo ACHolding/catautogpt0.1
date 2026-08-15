@@ -24,13 +24,17 @@ from colorama import Fore
 from autogpt.logs import logger
 
 MODEL_ID = "catseek-gpu-0.1"
-DEFAULT_N_CTX = 8192
+# 4k ctx is enough for Auto-GPT turns and much faster to prefill than 8k.
+DEFAULT_N_CTX = 4096
 DEFAULT_N_BATCH = 512
-DEFAULT_MAX_TOKENS = 1024
+# Keep completions short: R1 thinking otherwise burns the whole budget.
+DEFAULT_MAX_TOKENS = 512
 DEFAULT_EMBED_DIM = 1536
 DEFAULT_HF_REPO = "bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF"
 # ~8.4GB — fits Apple Silicon with Metal offload; override via CATSEEK_HF_FILE.
 DEFAULT_HF_FILE = "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"
+# Prefill closes the R1 think block so the model answers immediately.
+EMPTY_THINK_PREFILL = "<think>\n</think>\n"
 
 _CHAT_LOCK = threading.RLock()
 _chat_llm: Any = None
@@ -131,6 +135,7 @@ def apply_deepseek_chat_template(
     messages: Sequence[dict[str, str]],
     *,
     add_generation_prompt: bool = True,
+    prefill: str = "",
 ) -> str:
     """DeepSeek-R1-Distill-Qwen / ChatML-style template."""
     parts: list[str] = []
@@ -145,7 +150,19 @@ def apply_deepseek_chat_template(
             parts.append(f"<|im_start|>user\n{content}<|im_end|>\n")
     if add_generation_prompt:
         parts.append("<|im_start|>assistant\n")
+        if prefill:
+            parts.append(prefill)
     return "".join(parts)
+
+
+def _fast_mode() -> bool:
+    """Skip R1 chain-of-thought by prefilling an empty think block (default on)."""
+    return _env_bool("CATSEEK_FAST", True)
+
+
+def _max_token_cap(requested: int) -> int:
+    cap = _env_int("CATSEEK_MAX_TOKENS", DEFAULT_MAX_TOKENS)
+    return max(1, min(max(1, int(requested or DEFAULT_MAX_TOKENS)), max(1, cap)))
 
 
 def _llama_kwargs() -> dict[str, Any]:
@@ -217,6 +234,65 @@ def _append_trace(record: dict[str, Any]) -> None:
         logger.warn(f"CatSeek trace write skipped ({err})")
 
 
+def _strip_think(content: str) -> str:
+    text = (content or "").strip()
+    if _env_bool("CATSEEK_STRIP_THINK", True) and "</think>" in text:
+        text = text.split("</think>", 1)[-1].strip()
+    if text.startswith("<think>"):
+        # Unclosed think — keep a short stub rather than empty.
+        text = text.replace("<think>", "").strip() or text
+    return text
+
+
+def _complete_raw(
+    llm: Any,
+    cleaned: list[dict[str, str]],
+    *,
+    temperature: float,
+    max_tokens: int,
+    fast: bool,
+) -> tuple[str, int, int]:
+    """ChatML completion; in fast mode prefill an empty think block to skip CoT."""
+    stop = ["<|im_end|>", "<|endoftext|>"]
+    prefill = EMPTY_THINK_PREFILL if fast else ""
+    prompt = apply_deepseek_chat_template(
+        cleaned, add_generation_prompt=True, prefill=prefill
+    )
+    prompt_tokens = len(llm.tokenize(prompt.encode("utf-8"), add_bos=True))
+    room = max(16, _env_int("CATSEEK_N_CTX", DEFAULT_N_CTX) - prompt_tokens - 8)
+    gen_kwargs: dict[str, Any] = {
+        "max_tokens": min(max_tokens, room),
+        "temperature": max(0.0, temperature),
+        "stop": stop,
+        "echo": False,
+    }
+    if temperature <= 0:
+        gen_kwargs["temperature"] = 0.0
+        gen_kwargs["top_p"] = 1.0
+        gen_kwargs["top_k"] = 1
+
+    result = llm(prompt, **gen_kwargs)
+    content = result["choices"][0]["text"]
+    usage = result.get("usage") or {}
+    prompt_tokens = int(usage.get("prompt_tokens") or prompt_tokens)
+    completion_tokens = int(
+        usage.get("completion_tokens") or max(1, len(content or "") // 4)
+    )
+    return content, prompt_tokens, completion_tokens
+
+
+def _strip_markdown_fence(content: str) -> str:
+    text = (content or "").strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
 def create_chat_completion_raw(
     messages: Sequence[dict[str, str]],
     *,
@@ -228,65 +304,68 @@ def create_chat_completion_raw(
         {"role": m.get("role") or "user", "content": m.get("content") or ""}
         for m in messages
     ]
-    max_tokens = max(1, int(max_tokens or DEFAULT_MAX_TOKENS))
+    max_tokens = _max_token_cap(max_tokens)
     temperature = float(temperature if temperature is not None else 0.2)
+    fast = _fast_mode()
     t0 = time.time()
 
     with _CHAT_LOCK:
         llm = get_chat_llm()
-        stop = ["<|im_end|>", "<|endoftext|>"]
-        gen_kwargs: dict[str, Any] = {
-            "temperature": max(0.0, temperature),
-            "max_tokens": max_tokens,
-            "stop": stop,
-        }
-        if temperature <= 0:
-            gen_kwargs["temperature"] = 0.0
-            gen_kwargs["top_p"] = 1.0
-            gen_kwargs["top_k"] = 1
+        if fast:
+            # Raw + empty-think prefill: answers without burning tokens on CoT.
+            content, prompt_tokens, completion_tokens = _complete_raw(
+                llm,
+                cleaned,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                fast=True,
+            )
+        else:
+            stop = ["<|im_end|>", "<|endoftext|>"]
+            gen_kwargs: dict[str, Any] = {
+                "temperature": max(0.0, temperature),
+                "max_tokens": max_tokens,
+                "stop": stop,
+            }
+            if temperature <= 0:
+                gen_kwargs["temperature"] = 0.0
+                gen_kwargs["top_p"] = 1.0
+                gen_kwargs["top_k"] = 1
+            try:
+                result = llm.create_chat_completion(
+                    messages=cleaned,
+                    **gen_kwargs,
+                )
+                choice = result["choices"][0]
+                content = (
+                    (choice.get("message") or {}).get("content")
+                    or choice.get("text")
+                    or ""
+                )
+                usage = result.get("usage") or {}
+                prompt_tokens = int(usage.get("prompt_tokens") or 0)
+                completion_tokens = int(usage.get("completion_tokens") or 0)
+            except Exception:
+                content, prompt_tokens, completion_tokens = _complete_raw(
+                    llm,
+                    cleaned,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    fast=False,
+                )
 
-        try:
-            result = llm.create_chat_completion(
-                messages=cleaned,
-                **gen_kwargs,
-            )
-            choice = result["choices"][0]
-            content = (choice.get("message") or {}).get("content") or choice.get("text") or ""
-            usage = result.get("usage") or {}
-            prompt_tokens = int(usage.get("prompt_tokens") or 0)
-            completion_tokens = int(usage.get("completion_tokens") or 0)
-        except Exception:
-            # Raw completion fallback with ChatML template.
-            prompt = apply_deepseek_chat_template(cleaned, add_generation_prompt=True)
-            prompt_tokens = len(llm.tokenize(prompt.encode("utf-8"), add_bos=True))
-            room = max(16, _env_int("CATSEEK_N_CTX", DEFAULT_N_CTX) - prompt_tokens - 8)
-            result = llm(
-                prompt,
-                max_tokens=min(max_tokens, room),
-                temperature=gen_kwargs["temperature"],
-                stop=stop,
-                echo=False,
-            )
-            content = result["choices"][0]["text"]
-            usage = result.get("usage") or {}
-            prompt_tokens = int(usage.get("prompt_tokens") or prompt_tokens)
-            completion_tokens = int(
-                usage.get("completion_tokens") or max(1, len(content) // 4)
-            )
-
-    content = (content or "").strip()
-    # Strip DeepSeek thinking blocks for agent JSON loops unless kept.
-    if _env_bool("CATSEEK_STRIP_THINK", True) and "</think>" in content:
-        content = content.split("</think>", 1)[-1].strip()
-    if content.startswith("<think>"):
-        # Unclosed think — keep a short stub rather than empty.
-        content = content.replace("<think>", "").strip() or content
+    content = _strip_think(content)
+    # Prefer bare JSON for Auto-GPT's agent loop (models often wrap in ```json).
+    if content.startswith("```"):
+        content = _strip_markdown_fence(content)
+    latency_s = round(time.time() - t0, 3)
 
     _append_trace(
         {
             "ts": datetime.now(timezone.utc).isoformat(),
             "model": MODEL_ID,
-            "latency_s": round(time.time() - t0, 3),
+            "fast": fast,
+            "latency_s": latency_s,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "messages": cleaned,
@@ -298,8 +377,18 @@ def create_chat_completion_raw(
     try:
         latest = workspace_root() / "latest_reply.txt"
         latest.write_text(content, encoding="utf-8")
+        (workspace_root() / "last_latency.txt").write_text(
+            f"{latency_s}\n", encoding="utf-8"
+        )
     except Exception:
         pass
+
+    if latency_s >= 8.0:
+        logger.warn(
+            f"CatSeek-GPU slow reply {latency_s:.1f}s · tokens={completion_tokens} · "
+            f"fast={'on' if fast else 'off'} "
+            f"(CATSEEK_FAST=True / CATSEEK_MAX_TOKENS={DEFAULT_MAX_TOKENS})"
+        )
 
     return SimpleNamespace(
         model=MODEL_ID,

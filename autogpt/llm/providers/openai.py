@@ -6,6 +6,7 @@ Replaces OpenAI API + BitNet i2_s. Model names like ``gpt-3.5-turbo`` /
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional
 
@@ -160,7 +161,15 @@ def create_chat_completion(
 ) -> Any:
     """Create a chat completion using CatSeek-GPU 0.1."""
     temperature = float(kwargs.get("temperature", 0.2) or 0.2)
-    max_tokens = int(kwargs.get("max_tokens") or catseek_engine.DEFAULT_MAX_TOKENS)
+    # Auto-GPT often passes (n_ctx - prompt) as max_tokens (~7k). Cap so
+    # DeepSeek-R1 thinking cannot exhaust the budget before the real answer.
+    requested = int(kwargs.get("max_tokens") or catseek_engine.DEFAULT_MAX_TOKENS)
+    cap_raw = os.getenv("CATSEEK_MAX_TOKENS", str(catseek_engine.DEFAULT_MAX_TOKENS))
+    try:
+        cap = int(cap_raw or catseek_engine.DEFAULT_MAX_TOKENS)
+    except ValueError:
+        cap = catseek_engine.DEFAULT_MAX_TOKENS
+    max_tokens = max(1, min(requested, max(1, cap)))
     model_name = kwargs.get("model") or catseek_engine.MODEL_ID
 
     response = catseek_engine.create_chat_completion_raw(

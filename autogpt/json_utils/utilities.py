@@ -2,6 +2,7 @@
 import ast
 import json
 import os.path
+import re
 from typing import Any, Literal
 
 from jsonschema import Draft7Validator
@@ -11,21 +12,77 @@ from autogpt.logs import logger
 
 LLM_DEFAULT_RESPONSE_FORMAT = "llm_response_format_1"
 
+_FENCE_RE = re.compile(
+    r"^```(?:json|javascript|js|python|py)?\s*\n?(.*?)\n?```\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _strip_code_fence(text: str) -> str:
+    """Remove markdown fences, including ```json language tags."""
+    cleaned = (text or "").strip()
+    if not cleaned.startswith("```"):
+        return cleaned
+    match = _FENCE_RE.match(cleaned)
+    if match:
+        return match.group(1).strip()
+    # Fallback: drop first/last fence lines even if regex missed.
+    lines = cleaned.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _loads_object(text: str) -> dict[str, Any] | None:
+    """Parse a JSON/Python-dict object string into a dict."""
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+
+    # Local LLMs (CatSeek) emit real JSON; OpenAI historically emitted Python dicts.
+    try:
+        value = json.loads(cleaned)
+        if isinstance(value, dict):
+            return value
+    except json.JSONDecodeError:
+        pass
+
+    try:
+        value = ast.literal_eval(cleaned)
+        if isinstance(value, dict):
+            return value
+    except (SyntaxError, ValueError, MemoryError):
+        pass
+
+    return None
+
 
 def extract_dict_from_response(response_content: str) -> dict[str, Any]:
-    # Sometimes the response includes the JSON in a code block with ```
-    if response_content.startswith("```") and response_content.endswith("```"):
-        # Discard the first and last ```, then re-join in case the response naturally included ```
-        response_content = "```".join(response_content.split("```")[1:-1])
-
-    # response content comes from OpenAI as a Python `str(content_dict)`, literal_eval reverses this
-    try:
-        return ast.literal_eval(response_content)
-    except BaseException as e:
-        logger.info(f"Error parsing JSON response with literal_eval {e}")
-        logger.debug(f"Invalid JSON received in response: {response_content}")
-        # TODO: How to raise an error here without causing the program to exit?
+    """Extract a dict from an LLM reply (JSON, Python dict, or fenced block)."""
+    if response_content is None:
         return {}
+
+    text = _strip_code_fence(str(response_content))
+    parsed = _loads_object(text)
+    if parsed is not None:
+        return parsed
+
+    # Model often adds a preface; take the outermost {...} span.
+    match = _OBJECT_RE.search(text)
+    if match:
+        parsed = _loads_object(match.group(0))
+        if parsed is not None:
+            return parsed
+
+    logger.info(
+        "Error parsing JSON response with literal_eval "
+        f"invalid syntax near: {text[:120]!r}"
+    )
+    logger.debug(f"Invalid JSON received in response: {response_content}")
+    return {}
 
 
 def llm_response_schema(

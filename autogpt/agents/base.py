@@ -273,8 +273,10 @@ class BaseAgent(metaclass=ABCMeta):
 
         use_functions = self.config.openai_functions and self.command_registry.commands
         return (
-            f"Respond strictly with JSON{', and also specify a command to use through a function_call' if use_functions else ''}. "
-            "The JSON should be compatible with the TypeScript type `Response` from the following:\n"
+            f"Respond with a single raw JSON object only"
+            f"{', and also specify a command to use through a function_call' if use_functions else ''}. "
+            "Do not wrap the JSON in markdown fences or add any preface. "
+            "The JSON must match the TypeScript type `Response` from the following:\n"
             f"{response_format}\n"
         )
 

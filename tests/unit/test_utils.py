@@ -1,4 +1,5 @@
 import os
+import json
 from unittest.mock import patch
 
 import pytest
@@ -210,3 +211,22 @@ def test_extract_json_from_response_wrapped_in_code_block(valid_json_response: d
     assert (
         extract_dict_from_response(emulated_response_from_openai) == valid_json_response
     )
+
+
+def test_extract_json_from_response_json_fence(valid_json_response: dict):
+    """CatSeek/DeepSeek often wraps real JSON in ```json fences."""
+    fenced = "```json\n" + json.dumps(valid_json_response, indent=2) + "\n```"
+    assert extract_dict_from_response(fenced) == valid_json_response
+
+
+def test_extract_json_from_response_raw_json(valid_json_response: dict):
+    assert (
+        extract_dict_from_response(json.dumps(valid_json_response))
+        == valid_json_response
+    )
+
+
+def test_extract_json_from_response_with_preface(valid_json_response: dict):
+    text = "Sure, here you go:\n" + json.dumps(valid_json_response)
+    assert extract_dict_from_response(text) == valid_json_response
+
