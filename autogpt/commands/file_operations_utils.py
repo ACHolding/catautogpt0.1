@@ -88,7 +88,7 @@ class MarkdownParser(ParserStrategy):
     def read(self, file_path: str) -> str:
         with open(file_path, "r") as f:
             html = markdown.markdown(f.read())
-            text = "".join(BeautifulSoup(html, "html.parser").findAll(string=True))
+            text = "".join(BeautifulSoup(html, "html.parser").find_all(string=True))
         return text
 
 

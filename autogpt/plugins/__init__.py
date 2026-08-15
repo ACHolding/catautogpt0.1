@@ -279,9 +279,15 @@ def scan_plugins(config: Config, debug: bool = False) -> List[AutoGPTPluginTempl
                 logger.debug(f"Zipped Plugin: {plugin}, Module: {module}")
                 zipped_package = zipimporter(str(plugin))
                 try:
-                    zipped_module = zipped_package.load_module(str(module.parent))
-                except:
+                    fullname = str(module.parent)
+                    spec = zipped_package.find_spec(fullname)
+                    if spec is None or spec.loader is None:
+                        raise ImportError(f"No module spec for {fullname}")
+                    zipped_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(zipped_module)
+                except Exception:
                     logger.error(f"Failed to load {str(module.parent)}")
+                    continue
 
                 for key in dir(zipped_module):
                     if key.startswith("__"):

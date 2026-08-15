@@ -299,7 +299,7 @@ async def _create_completion(
         The completion.
 
     """
-    messages = [message.dict() for message in messages]
+    messages = [message.model_dump() for message in messages]
     if "functions" in kwargs:
         kwargs["functions"] = [function.json_schema for function in kwargs["functions"]]
     return await openai.ChatCompletion.acreate(

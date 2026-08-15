@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional, Union
 import yaml
 from auto_gpt_plugin_template import AutoGPTPluginTemplate
 from colorama import Fore
-from pydantic import Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from autogpt.core.configuration.schema import Configurable, SystemSettings
 from autogpt.llm.providers.openai import OPEN_AI_CHAT_MODELS
@@ -25,7 +25,13 @@ GPT_4_MODEL = "gpt-4"
 GPT_3_MODEL = "gpt-3.5-turbo"
 
 
-class Config(SystemSettings, arbitrary_types_allowed=True):
+class Config(SystemSettings):
+    model_config = ConfigDict(
+        extra="forbid",
+        use_enum_values=True,
+        arbitrary_types_allowed=True,
+    )
+
     name: str = "Auto-GPT configuration"
     description: str = "Default configuration for the Auto-GPT application."
     ########################
@@ -42,7 +48,7 @@ class Config(SystemSettings, arbitrary_types_allowed=True):
     speak_mode: bool = False
     text_to_speech_provider: str = "gtts"
     streamelements_voice: str = "Brian"
-    elevenlabs_voice_id: Optional[str] = None
+    elevenlabs_voice_id: str | None = None
 
     ##########################
     # Agent Control Settings #
@@ -50,9 +56,9 @@ class Config(SystemSettings, arbitrary_types_allowed=True):
     # Paths
     ai_settings_file: str = AI_SETTINGS_FILE
     prompt_settings_file: str = PROMPT_SETTINGS_FILE
-    workdir: Path = None
-    workspace_path: Optional[Path] = None
-    file_logger_path: Optional[Path] = None
+    workdir: Path | None = None
+    workspace_path: Path | None = None
+    file_logger_path: Path | None = None
     # Model configuration
     fast_llm: str = "gpt-3.5-turbo"
     smart_llm: str = "gpt-4-0314"

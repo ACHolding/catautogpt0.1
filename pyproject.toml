@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agpt"
-version = "0.4.7"
+version = "0.4.8"
 authors = [
   { name="Torantulino", email="support@agpt.co" },
 ]
@@ -16,7 +16,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-description = "An open-source attempt to make GPT-4 autonomous"
+description = "Auto-GPT fork optimized for Python 3.14 (catautogpt)"
 
 [project.urls]
 "Homepage" = "https://github.com/Significant-Gravitas/Auto-GPT"

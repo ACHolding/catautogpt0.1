@@ -17,7 +17,7 @@ class SimplePluginService(PluginService):
     def get_plugin(plugin_location: dict | PluginLocation) -> "PluginType":
         """Get a plugin from a plugin location."""
         if isinstance(plugin_location, dict):
-            plugin_location = PluginLocation.parse_obj(plugin_location)
+            plugin_location = PluginLocation.model_validate(plugin_location)
         if plugin_location.storage_format == PluginStorageFormat.WORKSPACE:
             return SimplePluginService.load_from_workspace(
                 plugin_location.storage_route
