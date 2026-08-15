@@ -178,7 +178,7 @@ class SimpleAgent(Agent, Configurable):
             agent_goals=self._configuration.goals,
             abilities=self._ability_registry.list_abilities(),
         )
-        tasks = [Task.parse_obj(task) for task in plan.content["task_list"]]
+        tasks = [Task.model_validate(task) for task in plan.content["task_list"]]
 
         # TODO: Should probably do a step to evaluate the quality of the generated tasks,
         #  and ensure that they have actionable ready and acceptance criteria
@@ -219,7 +219,7 @@ class SimpleAgent(Agent, Configurable):
             self._current_task = None
             self._next_ability = None
 
-            return ability_response.dict()
+            return ability_response.model_dump()
         else:
             raise NotImplementedError
 
@@ -288,7 +288,7 @@ class SimpleAgent(Agent, Configurable):
         configuration_dict = {
             "agent": cls.build_agent_configuration(
                 user_configuration.get("agent", {})
-            ).dict(),
+            ).model_dump(),
         }
 
         system_locations = configuration_dict["agent"]["configuration"]["systems"]
@@ -299,9 +299,9 @@ class SimpleAgent(Agent, Configurable):
             system_class = SimplePluginService.get_plugin(system_location)
             configuration_dict[system_name] = system_class.build_agent_configuration(
                 user_configuration.get(system_name, {})
-            ).dict()
+            ).model_dump()
 
-        return AgentSettings.parse_obj(configuration_dict)
+        return AgentSettings.model_validate(configuration_dict)
 
     @classmethod
     async def determine_agent_name_and_goals(
@@ -355,7 +355,7 @@ class SimpleAgent(Agent, Configurable):
         *args,
         **kwargs,
     ):
-        system_locations = agent_settings.agent.configuration.systems.dict()
+        system_locations = agent_settings.agent.configuration.systems.model_dump()
 
         system_settings = getattr(agent_settings, system_name)
         system_class = SimplePluginService.get_plugin(system_locations[system_name])

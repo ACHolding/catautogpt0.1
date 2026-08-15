@@ -4,13 +4,14 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 import yaml
 from auto_gpt_plugin_template import AutoGPTPluginTemplate
 from colorama import Fore
-from pydantic import Field, validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from autogpt.core.configuration.schema import Configurable, SystemSettings
 from autogpt.llm.providers.openai import OPEN_AI_CHAT_MODELS
@@ -21,11 +22,17 @@ AZURE_CONFIG_FILE = "azure.yaml"
 PLUGINS_CONFIG_FILE = "plugins_config.yaml"
 PROMPT_SETTINGS_FILE = "prompt_settings.yaml"
 
-GPT_4_MODEL = "gpt-4"
-GPT_3_MODEL = "gpt-3.5-turbo"
+GPT_4_MODEL = "catseek-gpu-0.1"
+GPT_3_MODEL = "catseek-gpu-0.1"
 
 
-class Config(SystemSettings, arbitrary_types_allowed=True):
+class Config(SystemSettings):
+    model_config = ConfigDict(
+        extra="forbid",
+        use_enum_values=True,
+        arbitrary_types_allowed=True,
+    )
+
     name: str = "Auto-GPT configuration"
     description: str = "Default configuration for the Auto-GPT application."
     ########################
@@ -42,7 +49,7 @@ class Config(SystemSettings, arbitrary_types_allowed=True):
     speak_mode: bool = False
     text_to_speech_provider: str = "gtts"
     streamelements_voice: str = "Brian"
-    elevenlabs_voice_id: Optional[str] = None
+    elevenlabs_voice_id: str | None = None
 
     ##########################
     # Agent Control Settings #
@@ -50,19 +57,23 @@ class Config(SystemSettings, arbitrary_types_allowed=True):
     # Paths
     ai_settings_file: str = AI_SETTINGS_FILE
     prompt_settings_file: str = PROMPT_SETTINGS_FILE
-    workdir: Path = None
-    workspace_path: Optional[Path] = None
-    file_logger_path: Optional[Path] = None
+    workdir: Path | None = None
+    workspace_path: Path | None = None
+    file_logger_path: Path | None = None
     # Model configuration
-    fast_llm: str = "gpt-3.5-turbo"
-    smart_llm: str = "gpt-4-0314"
+    fast_llm: str = "catseek-gpu-0.1"
+    smart_llm: str = "catseek-gpu-0.1"
     temperature: float = 0
     openai_functions: bool = False
-    embedding_model: str = "text-embedding-ada-002"
+    embedding_model: str = "catseek-embed"
     browse_spacy_language_model: str = "en_core_web_sm"
     # Run loop configuration
     continuous_mode: bool = False
     continuous_limit: int = 0
+
+    # Local CatSeek-GPU / llama.cpp (BITNET_* env aliases still accepted)
+    bitnet_model_path: str | None = None
+    catseek_model_path: str | None = None
 
     ##########
     # Memory #
@@ -138,35 +149,31 @@ class Config(SystemSettings, arbitrary_types_allowed=True):
     # Stable Diffusion
     sd_webui_auth: Optional[str] = None
 
-    @validator("plugins", each_item=True)
-    def validate_plugins(cls, p: AutoGPTPluginTemplate | Any):
-        assert issubclass(
-            p.__class__, AutoGPTPluginTemplate
-        ), f"{p} does not subclass AutoGPTPluginTemplate"
-        assert (
-            p.__class__.__name__ != "AutoGPTPluginTemplate"
-        ), f"Plugins must subclass AutoGPTPluginTemplate; {p} is a template instance"
-        return p
+    @field_validator("plugins")
+    @classmethod
+    def validate_plugins(cls, plugins: list[Any]):
+        for p in plugins:
+            assert issubclass(
+                p.__class__, AutoGPTPluginTemplate
+            ), f"{p} does not subclass AutoGPTPluginTemplate"
+            assert (
+                p.__class__.__name__ != "AutoGPTPluginTemplate"
+            ), f"Plugins must subclass AutoGPTPluginTemplate; {p} is a template instance"
+        return plugins
 
-    @validator("openai_functions")
-    def validate_openai_functions(cls, v: bool, values: dict[str, Any]):
-        if v:
-            smart_llm = values["smart_llm"]
+    @model_validator(mode="after")
+    def validate_openai_functions(self):
+        if self.openai_functions:
+            smart_llm = self.smart_llm
             assert OPEN_AI_CHAT_MODELS[smart_llm].supports_functions, (
                 f"Model {smart_llm} does not support OpenAI Functions. "
                 "Please disable OPENAI_FUNCTIONS or choose a suitable model."
             )
+        return self
 
     def get_openai_credentials(self, model: str) -> dict[str, str]:
-        credentials = {
-            "api_key": self.openai_api_key,
-            "api_base": self.openai_api_base,
-            "organization": self.openai_organization,
-        }
-        if self.use_azure:
-            azure_credentials = self.get_azure_credentials(model)
-            credentials.update(azure_credentials)
-        return credentials
+        """Legacy hook — BitNet runs locally and needs no cloud credentials."""
+        return {}
 
     def get_azure_credentials(self, model: str) -> dict[str, str]:
         """Get the kwargs for the Azure API."""
@@ -239,6 +246,14 @@ class ConfigBuilder(Configurable[Config]):
             "smart_llm": os.getenv("SMART_LLM", os.getenv("SMART_LLM_MODEL")),
             "embedding_model": os.getenv("EMBEDDING_MODEL"),
             "browse_spacy_language_model": os.getenv("BROWSE_SPACY_LANGUAGE_MODEL"),
+            "bitnet_model_path": os.getenv(
+                "CATSEEK_MODEL_PATH",
+                os.getenv("BITNET_MODEL_PATH", os.getenv("LLM_MODEL_PATH")),
+            ),
+            "catseek_model_path": os.getenv(
+                "CATSEEK_MODEL_PATH",
+                os.getenv("BITNET_MODEL_PATH", os.getenv("LLM_MODEL_PATH")),
+            ),
             "openai_api_key": os.getenv("OPENAI_API_KEY"),
             "use_azure": os.getenv("USE_AZURE") == "True",
             "azure_config_file": os.getenv("AZURE_CONFIG_FILE", AZURE_CONFIG_FILE),
@@ -336,9 +351,17 @@ class ConfigBuilder(Configurable[Config]):
         config = cls.build_agent_configuration(config_dict_without_none_values)
 
         # Set secondary config variables (that depend on other config variables)
+        if config.workdir is None:
+            config.workdir = Path(workdir).resolve()
+        elif not isinstance(config.workdir, Path):
+            config.workdir = Path(config.workdir)
+
+        plugins_path = Path(config.plugins_config_file)
+        if not plugins_path.is_absolute():
+            plugins_path = config.workdir / plugins_path
 
         config.plugins_config = PluginsConfig.load_config(
-            config.workdir / config.plugins_config_file,
+            plugins_path,
             config.plugins_denylist,
             config.plugins_allowlist,
         )
@@ -372,34 +395,89 @@ class ConfigBuilder(Configurable[Config]):
         }
 
 
-def check_openai_api_key(config: Config) -> None:
-    """Check if the OpenAI API key is set in config.py or as an environment variable."""
-    if not config.openai_api_key:
+def check_bitnet_model(config: Config) -> None:
+    """Ensure CatSeek-GPU 0.1 (DeepSeek-R1 14B GGUF) is available and warm-start."""
+    from autogpt.llm.providers import catseek_bake, catseek_engine
+
+    path_hint = (
+        config.catseek_model_path
+        or config.bitnet_model_path
+        or os.getenv("CATSEEK_MODEL_PATH")
+        or os.getenv("BITNET_MODEL_PATH")
+        or os.getenv("LLM_MODEL_PATH")
+    )
+    if path_hint:
+        os.environ.setdefault("CATSEEK_MODEL_PATH", str(path_hint))
+        os.environ.setdefault("BITNET_MODEL_PATH", str(path_hint))
+
+    explicit = (
+        os.getenv("CATSEEK_MODEL_PATH")
+        or os.getenv("BITNET_MODEL_PATH")
+        or os.getenv("LLM_MODEL_PATH")
+    )
+    if explicit and explicit.strip() and not Path(explicit).expanduser().exists():
         print(
-            Fore.RED
-            + "Please set your OpenAI API key in .env or as an environment variable."
+            Fore.YELLOW
+            + f"CATSEEK_MODEL_PATH missing ({explicit}); attempting auto-bake…"
             + Fore.RESET
         )
-        print("You can get your key from https://platform.openai.com/account/api-keys")
-        openai_api_key = input(
-            "If you do have the key, please enter your OpenAI API key now:\n"
+        os.environ.pop("CATSEEK_MODEL_PATH", None)
+        os.environ.pop("BITNET_MODEL_PATH", None)
+        os.environ.pop("LLM_MODEL_PATH", None)
+
+    try:
+        path = catseek_engine.warm_start()
+    except FileNotFoundError as err:
+        print(Fore.RED + str(err) + Fore.RESET)
+        print(
+            Fore.YELLOW
+            + "Download / setup:\n"
+            + "  ./scripts/setup_catseek.sh\n"
+            + "  # or set CATSEEK_AUTO_DOWNLOAD=True and retry"
+            + Fore.RESET
         )
-        key_pattern = r"^sk-\w{48}"
-        openai_api_key = openai_api_key.strip()
-        if re.search(key_pattern, openai_api_key):
-            os.environ["OPENAI_API_KEY"] = openai_api_key
-            config.openai_api_key = openai_api_key
-            print(
-                Fore.GREEN
-                + "OpenAI API key successfully set!\n"
-                + Fore.YELLOW
-                + "NOTE: The API key you've set is only temporary.\n"
-                + "For longer sessions, please set it in .env file"
-                + Fore.RESET
-            )
-        else:
-            print("Invalid OpenAI API key!")
-            exit(1)
+        raise SystemExit(2) from err
+    except SystemExit:
+        raise
+    except Exception as err:
+        print(Fore.RED + f"Failed to load CatSeek-GPU model: {err}" + Fore.RESET)
+        print(
+            Fore.YELLOW
+            + "CatSeek-GPU 0.1 needs llama-cpp-python + DeepSeek-R1-Distill-Qwen-14B GGUF.\n"
+            + "  ./scripts/setup_catseek.sh\n"
+            + "  # downloads ~8–9GB Q4_K_M into models/CatSeek-GPU-0.1-14B/\n"
+            + "  # artifacts land in auto_gpt_workspace/catseek-gpu-0.1/"
+            + Fore.RESET
+        )
+        raise SystemExit(2) from err
+
+    config.bitnet_model_path = str(path)
+    config.catseek_model_path = str(path)
+    os.environ["CATSEEK_MODEL_PATH"] = str(path)
+    os.environ["BITNET_MODEL_PATH"] = str(path)
+
+    try:
+        env_file = Path(config.workdir or ".") / ".env"
+        if config.workdir:
+            env_file = Path(config.workdir) / ".env"
+        catseek_bake.write_env_model_path(Path(path), env_file)
+    except Exception:
+        pass
+
+
+# Backwards-compatible name used by older call sites / tests.
+def check_openai_api_key(config: Config) -> None:
+    """Deprecated alias — Auto-GPT now uses local CatSeek-GPU, not OpenAI API keys."""
+    check_bitnet_model(config)
+
+
+def check_catseek_model(config: Config) -> None:
+    """Alias for check_bitnet_model — CatSeek-GPU warm-start."""
+    check_bitnet_model(config)
+
+
+# Used in the hint above; resolved relative to the project root.
+_PROJECT_ENV_HINT = ".env.template"
 
 
 def _safe_split(s: Union[str, None], sep: str = ",") -> list[str]:

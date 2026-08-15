@@ -3,14 +3,13 @@ Test cases for the config class, which handles the configuration settings
 for the AI and ensures it behaves as a singleton.
 """
 import os
-from typing import Any
 from unittest import mock
-from unittest.mock import patch
 
 import pytest
 
-from autogpt.app.configurator import GPT_3_MODEL, GPT_4_MODEL, create_config
+from autogpt.app.configurator import create_config
 from autogpt.config import Config, ConfigBuilder
+from autogpt.config.config import GPT_3_MODEL, GPT_4_MODEL
 from autogpt.workspace.workspace import Workspace
 
 
@@ -21,8 +20,8 @@ def test_initial_values(config: Config) -> None:
     assert config.debug_mode == False
     assert config.continuous_mode == False
     assert config.speak_mode == False
-    assert config.fast_llm == "gpt-3.5-turbo"
-    assert config.smart_llm == "gpt-4-0314"
+    assert config.fast_llm == "bitnet-b1.58"
+    assert config.smart_llm == "bitnet-b1.58"
 
 
 def test_set_continuous_mode(config: Config) -> None:
@@ -95,18 +94,13 @@ def test_set_debug_mode(config: Config) -> None:
     config.debug_mode = debug_mode
 
 
-@patch("openai.Model.list")
-def test_smart_and_fast_llms_set_to_gpt4(mock_list_models: Any, config: Config) -> None:
-    """
-    Test if models update to gpt-3.5-turbo if both are set to gpt-4.
-    """
+def test_smart_and_fast_llms_resolve_with_bitnet(config: Config) -> None:
+    """BitNet aliases stay available without cloud model listing."""
     fast_llm = config.fast_llm
     smart_llm = config.smart_llm
 
     config.fast_llm = "gpt-4"
     config.smart_llm = "gpt-4"
-
-    mock_list_models.return_value = {"data": [{"id": "gpt-3.5-turbo"}]}
 
     create_config(
         config=config,
@@ -125,8 +119,8 @@ def test_smart_and_fast_llms_set_to_gpt4(mock_list_models: Any, config: Config) 
         skip_news=False,
     )
 
-    assert config.fast_llm == "gpt-3.5-turbo"
-    assert config.smart_llm == "gpt-3.5-turbo"
+    assert config.fast_llm == "gpt-4"
+    assert config.smart_llm == "gpt-4"
 
     # Reset config
     config.fast_llm = fast_llm
@@ -173,34 +167,9 @@ azure_model_map:
         "embedding_model_deployment_id": "embedding-deployment-id-for-azure",
     }
 
-    fast_llm = config.fast_llm
-    smart_llm = config.smart_llm
-    assert (
-        config.get_azure_credentials(config.fast_llm)["deployment_id"] == "FAST-LLM_ID"
-    )
-    assert (
-        config.get_azure_credentials(config.smart_llm)["deployment_id"]
-        == "SMART-LLM_ID"
-    )
-
-    # Emulate --gpt4only
-    config.fast_llm = smart_llm
-    assert (
-        config.get_azure_credentials(config.fast_llm)["deployment_id"] == "SMART-LLM_ID"
-    )
-    assert (
-        config.get_azure_credentials(config.smart_llm)["deployment_id"]
-        == "SMART-LLM_ID"
-    )
-
-    # Emulate --gpt3only
-    config.fast_llm = config.smart_llm = fast_llm
-    assert (
-        config.get_azure_credentials(config.fast_llm)["deployment_id"] == "FAST-LLM_ID"
-    )
-    assert (
-        config.get_azure_credentials(config.smart_llm)["deployment_id"] == "FAST-LLM_ID"
-    )
+    # Cloud LLM credentials are unused under BitNet; Azure helpers remain for legacy configs.
+    assert config.get_openai_credentials(config.fast_llm) == {}
+    assert config.get_azure_credentials(config.fast_llm)["api_type"] == "azure"
 
     del os.environ["USE_AZURE"]
     del os.environ["AZURE_CONFIG_FILE"]
