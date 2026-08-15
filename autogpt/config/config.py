@@ -345,9 +345,17 @@ class ConfigBuilder(Configurable[Config]):
         config = cls.build_agent_configuration(config_dict_without_none_values)
 
         # Set secondary config variables (that depend on other config variables)
+        if config.workdir is None:
+            config.workdir = Path(workdir).resolve()
+        elif not isinstance(config.workdir, Path):
+            config.workdir = Path(config.workdir)
+
+        plugins_path = Path(config.plugins_config_file)
+        if not plugins_path.is_absolute():
+            plugins_path = config.workdir / plugins_path
 
         config.plugins_config = PluginsConfig.load_config(
-            config.workdir / config.plugins_config_file,
+            plugins_path,
             config.plugins_denylist,
             config.plugins_allowlist,
         )
@@ -386,7 +394,21 @@ def check_bitnet_model(config: Config) -> None:
     from autogpt.llm.providers import bitnet_engine
 
     if config.bitnet_model_path:
-        os.environ.setdefault("BITNET_MODEL_PATH", config.bitnet_model_path)
+        os.environ.setdefault("BITNET_MODEL_PATH", str(config.bitnet_model_path))
+
+    explicit = os.getenv("BITNET_MODEL_PATH") or os.getenv("LLM_MODEL_PATH")
+    if explicit and explicit.strip() and not Path(explicit).expanduser().exists():
+        print(
+            Fore.RED
+            + f"BITNET_MODEL_PATH does not exist: {explicit}"
+            + Fore.RESET
+        )
+        print(
+            Fore.YELLOW
+            + "Fix the path in .env, or run: ./scripts/setup_bitnet.sh"
+            + Fore.RESET
+        )
+        raise SystemExit(2)
 
     try:
         path = bitnet_engine.warm_start()
@@ -407,6 +429,12 @@ def check_bitnet_model(config: Config) -> None:
         raise
     except Exception as err:
         print(Fore.RED + f"Failed to load BitNet model: {err}" + Fore.RESET)
+        print(
+            Fore.YELLOW
+            + "Check BITNET_MODEL_PATH points to a BitNet i2_s GGUF, "
+            + "and that llama-cpp-python is installed."
+            + Fore.RESET
+        )
         raise SystemExit(2) from err
 
     config.bitnet_model_path = str(path)

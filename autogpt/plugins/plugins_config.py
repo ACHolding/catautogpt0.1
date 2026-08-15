@@ -10,6 +10,11 @@ from autogpt.logs import logger
 from autogpt.plugins.plugin_config import PluginConfig
 
 
+def _as_path(plugins_config_file: str | Path) -> Path:
+    """Coerce config paths to Path (tests/env often pass plain strings)."""
+    return plugins_config_file if isinstance(plugins_config_file, Path) else Path(plugins_config_file)
+
+
 class PluginsConfig(BaseModel):
     """Class for holding configuration of all plugins"""
 
@@ -28,7 +33,7 @@ class PluginsConfig(BaseModel):
     @classmethod
     def load_config(
         cls,
-        plugins_config_file: Path,
+        plugins_config_file: str | Path,
         plugins_denylist: list[str],
         plugins_allowlist: list[str],
     ) -> "PluginsConfig":
@@ -40,14 +45,14 @@ class PluginsConfig(BaseModel):
                 plugins_denylist,
                 plugins_allowlist,
             )
-            if type(config_data) != dict:
+            if not isinstance(config_data, dict):
                 logger.error(
                     f"Expected plugins config to be a dict, got {type(config_data)}, continuing without plugins"
                 )
                 return empty_config
             return cls(plugins=config_data)
 
-        except BaseException as e:
+        except Exception as e:
             logger.error(
                 f"Plugin config is invalid, continuing without plugins. Error: {e}"
             )
@@ -56,10 +61,12 @@ class PluginsConfig(BaseModel):
     @classmethod
     def deserialize_config_file(
         cls,
-        plugins_config_file: Path,
+        plugins_config_file: str | Path,
         plugins_denylist: list[str],
         plugins_allowlist: list[str],
     ) -> dict[str, PluginConfig]:
+        plugins_config_file = _as_path(plugins_config_file)
+
         if not plugins_config_file.is_file():
             logger.warn("plugins_config.yaml does not exist, creating base config.")
             cls.create_empty_plugins_config(
@@ -69,17 +76,22 @@ class PluginsConfig(BaseModel):
             )
 
         with open(plugins_config_file, "r") as f:
-            plugins_config = yaml.load(f, Loader=yaml.FullLoader)
+            plugins_config = yaml.safe_load(f) or {}
+
+        if not isinstance(plugins_config, dict):
+            raise ValueError(
+                f"plugins_config.yaml must be a mapping, got {type(plugins_config)}"
+            )
 
         plugins = {}
         for name, plugin in plugins_config.items():
-            if type(plugin) == dict:
+            if isinstance(plugin, dict):
                 plugins[name] = PluginConfig(
                     name=name,
                     enabled=plugin.get("enabled", False),
                     config=plugin.get("config", {}),
                 )
-            elif type(plugin) == PluginConfig:
+            elif isinstance(plugin, PluginConfig):
                 plugins[name] = plugin
             else:
                 raise ValueError(f"Invalid plugin config data type: {type(plugin)}")
@@ -87,11 +99,14 @@ class PluginsConfig(BaseModel):
 
     @staticmethod
     def create_empty_plugins_config(
-        plugins_config_file: Path,
+        plugins_config_file: str | Path,
         plugins_denylist: list[str],
         plugins_allowlist: list[str],
     ):
         """Create an empty plugins_config.yaml file. Fill it with values from old env variables."""
+        plugins_config_file = _as_path(plugins_config_file)
+        plugins_config_file.parent.mkdir(parents=True, exist_ok=True)
+
         base_config = {}
 
         logger.debug(f"Legacy plugin denylist: {plugins_denylist}")
