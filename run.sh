@@ -20,7 +20,7 @@ function find_python_command() {
 
 PYTHON_CMD=$(find_python_command)
 
-if $PYTHON_CMD -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"; then
+if $PYTHON_CMD -c "import sys; sys.exit(0 if sys.version_info >= (3, 14) else 1)"; then
     CHECK_OUT=$($PYTHON_CMD scripts/check_requirements.py requirements.txt 2>&1) || {
         echo "$CHECK_OUT"
         # Install only the packages reported missing (second line of checker output).
@@ -54,6 +54,6 @@ if $PYTHON_CMD -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)
         read -p "Press any key to continue..."
     fi
 else
-    echo "Python 3.10 or higher is required to run Auto GPT."
+    echo "Python 3.14 or higher is required to run Auto GPT."
     exit 1
 fi
