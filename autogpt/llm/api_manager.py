@@ -25,12 +25,12 @@ class ApiManager(metaclass=Singleton):
     def update_cost(self, prompt_tokens, completion_tokens, model):
         """
         Update the total cost, prompt tokens, and completion tokens.
-        Local BitNet inference is free; we still track token counts.
+        Local CatSeek-GPU inference is free; we still track token counts.
         """
         from autogpt.llm.providers.openai import OPEN_AI_MODELS
 
         model = model[:-3] if model.endswith("-v2") else model
-        model_info = OPEN_AI_MODELS.get(model) or OPEN_AI_MODELS["bitnet-b1.58"]
+        model_info = OPEN_AI_MODELS.get(model) or OPEN_AI_MODELS["catseek-gpu-0.1"]
 
         self.total_prompt_tokens += prompt_tokens
         self.total_completion_tokens += completion_tokens
@@ -61,7 +61,7 @@ class ApiManager(metaclass=Singleton):
         return self.total_budget
 
     def get_models(self, **_credentials) -> List[dict[str, Any]]:
-        """Return locally available BitNet-compatible model ids."""
+        """Return locally available CatSeek-compatible model ids."""
         if self.models is None:
             from autogpt.llm.providers.openai import OPEN_AI_CHAT_MODELS
 

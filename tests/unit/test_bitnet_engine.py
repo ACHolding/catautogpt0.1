@@ -113,16 +113,16 @@ def test_provider_create_chat_completion_updates_api_manager(monkeypatch):
     api = ApiManager()
 
     fake = SimpleNamespace(
-        model="bitnet-b1.58",
+        model="catseek-gpu-0.1",
         usage=SimpleNamespace(prompt_tokens=11, completion_tokens=7),
         choices=[SimpleNamespace(message={"role": "assistant", "content": "ok"})],
     )
     monkeypatch.setattr(
-        "autogpt.llm.providers.bitnet_engine.create_chat_completion_raw",
+        "autogpt.llm.providers.catseek_engine.create_chat_completion_raw",
         lambda *a, **k: fake,
     )
     out = provider.create_chat_completion(
-        [{"role": "user", "content": "x"}], model="bitnet-b1.58", max_tokens=16
+        [{"role": "user", "content": "x"}], model="catseek-gpu-0.1", max_tokens=16
     )
     assert out.choices[0].message["content"] == "ok"
     assert api.get_total_prompt_tokens() == 11

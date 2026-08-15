@@ -22,8 +22,8 @@ AZURE_CONFIG_FILE = "azure.yaml"
 PLUGINS_CONFIG_FILE = "plugins_config.yaml"
 PROMPT_SETTINGS_FILE = "prompt_settings.yaml"
 
-GPT_4_MODEL = "bitnet-b1.58"
-GPT_3_MODEL = "bitnet-b1.58"
+GPT_4_MODEL = "catseek-gpu-0.1"
+GPT_3_MODEL = "catseek-gpu-0.1"
 
 
 class Config(SystemSettings):
@@ -61,18 +61,19 @@ class Config(SystemSettings):
     workspace_path: Path | None = None
     file_logger_path: Path | None = None
     # Model configuration
-    fast_llm: str = "bitnet-b1.58"
-    smart_llm: str = "bitnet-b1.58"
+    fast_llm: str = "catseek-gpu-0.1"
+    smart_llm: str = "catseek-gpu-0.1"
     temperature: float = 0
     openai_functions: bool = False
-    embedding_model: str = "bitnet-embed"
+    embedding_model: str = "catseek-embed"
     browse_spacy_language_model: str = "en_core_web_sm"
     # Run loop configuration
     continuous_mode: bool = False
     continuous_limit: int = 0
 
-    # Local BitNet / llama.cpp
+    # Local CatSeek-GPU / llama.cpp (BITNET_* env aliases still accepted)
     bitnet_model_path: str | None = None
+    catseek_model_path: str | None = None
 
     ##########
     # Memory #
@@ -246,7 +247,12 @@ class ConfigBuilder(Configurable[Config]):
             "embedding_model": os.getenv("EMBEDDING_MODEL"),
             "browse_spacy_language_model": os.getenv("BROWSE_SPACY_LANGUAGE_MODEL"),
             "bitnet_model_path": os.getenv(
-                "BITNET_MODEL_PATH", os.getenv("LLM_MODEL_PATH")
+                "CATSEEK_MODEL_PATH",
+                os.getenv("BITNET_MODEL_PATH", os.getenv("LLM_MODEL_PATH")),
+            ),
+            "catseek_model_path": os.getenv(
+                "CATSEEK_MODEL_PATH",
+                os.getenv("BITNET_MODEL_PATH", os.getenv("LLM_MODEL_PATH")),
             ),
             "openai_api_key": os.getenv("OPENAI_API_KEY"),
             "use_azure": os.getenv("USE_AZURE") == "True",
@@ -390,65 +396,83 @@ class ConfigBuilder(Configurable[Config]):
 
 
 def check_bitnet_model(config: Config) -> None:
-    """Ensure a local BitNet GGUF is available (auto-bake if missing) and warm-start."""
-    from autogpt.llm.providers import bitnet_bake, bitnet_engine
+    """Ensure CatSeek-GPU 0.1 (DeepSeek-R1 14B GGUF) is available and warm-start."""
+    from autogpt.llm.providers import catseek_bake, catseek_engine
 
-    if config.bitnet_model_path:
-        os.environ.setdefault("BITNET_MODEL_PATH", str(config.bitnet_model_path))
+    path_hint = (
+        config.catseek_model_path
+        or config.bitnet_model_path
+        or os.getenv("CATSEEK_MODEL_PATH")
+        or os.getenv("BITNET_MODEL_PATH")
+        or os.getenv("LLM_MODEL_PATH")
+    )
+    if path_hint:
+        os.environ.setdefault("CATSEEK_MODEL_PATH", str(path_hint))
+        os.environ.setdefault("BITNET_MODEL_PATH", str(path_hint))
 
-    explicit = os.getenv("BITNET_MODEL_PATH") or os.getenv("LLM_MODEL_PATH")
+    explicit = (
+        os.getenv("CATSEEK_MODEL_PATH")
+        or os.getenv("BITNET_MODEL_PATH")
+        or os.getenv("LLM_MODEL_PATH")
+    )
     if explicit and explicit.strip() and not Path(explicit).expanduser().exists():
-        # Stale path in .env — clear and let auto-bake recover.
         print(
             Fore.YELLOW
-            + f"BITNET_MODEL_PATH missing ({explicit}); attempting auto-bake…"
+            + f"CATSEEK_MODEL_PATH missing ({explicit}); attempting auto-bake…"
             + Fore.RESET
         )
+        os.environ.pop("CATSEEK_MODEL_PATH", None)
         os.environ.pop("BITNET_MODEL_PATH", None)
         os.environ.pop("LLM_MODEL_PATH", None)
 
     try:
-        path = bitnet_engine.warm_start()
+        path = catseek_engine.warm_start()
     except FileNotFoundError as err:
         print(Fore.RED + str(err) + Fore.RESET)
         print(
             Fore.YELLOW
             + "Download / setup:\n"
-            + "  ./scripts/setup_bitnet.sh\n"
-            + "  # or set BITNET_AUTO_DOWNLOAD=True and retry"
+            + "  ./scripts/setup_catseek.sh\n"
+            + "  # or set CATSEEK_AUTO_DOWNLOAD=True and retry"
             + Fore.RESET
         )
         raise SystemExit(2) from err
     except SystemExit:
         raise
     except Exception as err:
-        print(Fore.RED + f"Failed to load BitNet model: {err}" + Fore.RESET)
+        print(Fore.RED + f"Failed to load CatSeek-GPU model: {err}" + Fore.RESET)
         print(
             Fore.YELLOW
-            + "Official BitNet i2_s GGUF needs bitnet.cpp (not stock llama.cpp).\n"
-            + "  BITNET_BUILD_CPP=1 ./scripts/setup_bitnet.sh\n"
-            + "  # or BITNET_AUTO_BUILD=True (default) on first run\n"
-            + "  # then set BITNET_HOME=third_party/BitNet if needed"
+            + "CatSeek-GPU 0.1 needs llama-cpp-python + DeepSeek-R1-Distill-Qwen-14B GGUF.\n"
+            + "  ./scripts/setup_catseek.sh\n"
+            + "  # downloads ~8–9GB Q4_K_M into models/CatSeek-GPU-0.1-14B/\n"
+            + "  # artifacts land in auto_gpt_workspace/catseek-gpu-0.1/"
             + Fore.RESET
         )
         raise SystemExit(2) from err
 
     config.bitnet_model_path = str(path)
+    config.catseek_model_path = str(path)
+    os.environ["CATSEEK_MODEL_PATH"] = str(path)
     os.environ["BITNET_MODEL_PATH"] = str(path)
 
-    # Persist path into .env so the next vibe-check boots instantly.
     try:
         env_file = Path(config.workdir or ".") / ".env"
         if config.workdir:
             env_file = Path(config.workdir) / ".env"
-        bitnet_bake.write_env_model_path(Path(path), env_file)
+        catseek_bake.write_env_model_path(Path(path), env_file)
     except Exception:
         pass
 
 
 # Backwards-compatible name used by older call sites / tests.
 def check_openai_api_key(config: Config) -> None:
-    """Deprecated alias — Auto-GPT now uses local BitNet, not OpenAI API keys."""
+    """Deprecated alias — Auto-GPT now uses local CatSeek-GPU, not OpenAI API keys."""
+    check_bitnet_model(config)
+
+
+def check_catseek_model(config: Config) -> None:
+    """Alias for check_bitnet_model — CatSeek-GPU warm-start."""
     check_bitnet_model(config)
 
 

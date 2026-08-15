@@ -3,7 +3,7 @@
 # Restarts automatically if the process exits (crash, limit, etc.).
 # Stop with Ctrl+C.
 #
-# Exit code 2 = configuration error (e.g. missing BITNET_MODEL_PATH):
+# Exit code 2 = configuration error (e.g. missing CATSEEK_MODEL_PATH):
 # the supervisor will NOT restart in that case.
 
 set -uo pipefail
@@ -31,9 +31,9 @@ fi
 
 if [[ ! -f "$SCRIPT_DIR/.env" ]]; then
     echo "Missing $SCRIPT_DIR/.env"
-    echo "Create one from the template and set BITNET_MODEL_PATH:"
+    echo "Create one from the template and bake CatSeek-GPU 0.1:"
     echo "  cp .env.template .env"
-    echo "  # then edit .env and set BITNET_MODEL_PATH=/path/to/model.gguf"
+    echo "  ./scripts/setup_catseek.sh"
     exit 2
 fi
 
@@ -44,14 +44,14 @@ set -a
 source "$SCRIPT_DIR/.env" 2>/dev/null || true
 set +a
 
-if [[ -z "${BITNET_MODEL_PATH:-}${LLM_MODEL_PATH:-}" ]]; then
+if [[ -z "${CATSEEK_MODEL_PATH:-}${BITNET_MODEL_PATH:-}${LLM_MODEL_PATH:-}" ]]; then
     # Allow auto-discovery of models/*.gguf inside the project.
     if ! compgen -G "$SCRIPT_DIR/models/**/*.gguf" >/dev/null \
         && ! compgen -G "$SCRIPT_DIR/models/*.gguf" >/dev/null; then
-        echo "No BitNet GGUF model configured."
-        echo "Set BITNET_MODEL_PATH in .env, e.g.:"
-        echo "  huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf --local-dir models/BitNet-b1.58-2B-4T"
-        echo "  BITNET_MODEL_PATH=$SCRIPT_DIR/models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf"
+        echo "No CatSeek GGUF model configured."
+        echo "Bake DeepSeek-R1-Distill-Qwen-14B with:"
+        echo "  ./scripts/setup_catseek.sh"
+        echo "  # or set CATSEEK_MODEL_PATH=/path/to/DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"
         exit 2
     fi
 fi
@@ -85,6 +85,8 @@ for arg in "$@"; do
 done
 
 echo "Starting Auto-GPT continuous supervisor in ${SCRIPT_DIR}"
+echo "LLM: CatSeek-GPU 0.1 (DeepSeek-R1-Distill-Qwen-14B)"
+echo "Workspace: ${SCRIPT_DIR}/auto_gpt_workspace"
 echo "Press Ctrl+C to stop."
 echo
 
@@ -103,10 +105,10 @@ while true; do
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Auto-GPT exited with code ${exit_code}."
     fi
 
-    # 2 = configuration error (missing BitNet model, etc.) — do not restart-loop.
+    # 2 = configuration error (missing CatSeek model, etc.) — do not restart-loop.
     if [[ $exit_code -eq 2 ]]; then
-        echo "Configuration error. Fix BitNet runtime (BITNET_MODEL_PATH / bitnet.cpp), then re-run."
-        echo "  Official i2_s GGUF needs: BITNET_BUILD_CPP=1 ./scripts/setup_bitnet.sh"
+        echo "Configuration error. Fix CatSeek runtime (CATSEEK_MODEL_PATH / llama-cpp-python), then re-run."
+        echo "  ./scripts/setup_catseek.sh"
         exit 2
     fi
 

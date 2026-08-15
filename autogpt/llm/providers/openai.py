@@ -1,13 +1,15 @@
-"""Local BitNet LLM provider (BitNet engine + compatibility aliases).
+"""Local CatSeek-GPU 0.1 LLM provider (DeepSeek-R1-Distill-Qwen-14B).
 
-Replaces the former OpenAI API provider. Model names like ``gpt-3.5-turbo`` /
-``gpt-4`` are kept as aliases so the rest of Auto-GPT keeps working unchanged.
+Replaces OpenAI API + BitNet i2_s. Model names like ``gpt-3.5-turbo`` /
+``gpt-4`` / ``bitnet-b1.58`` remain aliases so the rest of Auto-GPT keeps working.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional
+
+from colorama import Fore
 
 from autogpt.llm.base import (
     ChatModelInfo,
@@ -16,75 +18,86 @@ from autogpt.llm.base import (
     TextModelInfo,
     TText,
 )
-from autogpt.llm.providers import bitnet_engine
+from autogpt.llm.providers import catseek_engine
+from autogpt.logs import logger
 from autogpt.models.command_registry import CommandRegistry
 
-# Canonical BitNet chat model + compatibility aliases for old config values.
-_BITNET_CHAT = ChatModelInfo(
-    name="bitnet-b1.58",
+# Canonical CatSeek chat model + compatibility aliases.
+_CATSEEK_CHAT = ChatModelInfo(
+    name=catseek_engine.MODEL_ID,
     prompt_token_cost=0.0,
     completion_token_cost=0.0,
-    max_tokens=bitnet_engine.DEFAULT_N_CTX,
+    max_tokens=catseek_engine.DEFAULT_N_CTX,
     supports_functions=False,
 )
 
 OPEN_AI_CHAT_MODELS: dict[str, ChatModelInfo] = {
-    "bitnet-b1.58": _BITNET_CHAT,
-    # Aliases so existing FAST_LLM / SMART_LLM env values still resolve.
-    "gpt-3.5-turbo": ChatModelInfo(**{**_BITNET_CHAT.__dict__, "name": "gpt-3.5-turbo"}),
+    catseek_engine.MODEL_ID: _CATSEEK_CHAT,
+    "catseek-gpu": _CATSEEK_CHAT,
+    "catseek": _CATSEEK_CHAT,
+    "deepseek-r1-14b": _CATSEEK_CHAT,
+    # Legacy BitNet / OpenAI aliases → CatSeek.
+    "bitnet-b1.58": ChatModelInfo(**{**_CATSEEK_CHAT.__dict__, "name": "bitnet-b1.58"}),
+    "gpt-3.5-turbo": ChatModelInfo(**{**_CATSEEK_CHAT.__dict__, "name": "gpt-3.5-turbo"}),
     "gpt-3.5-turbo-0301": ChatModelInfo(
-        **{**_BITNET_CHAT.__dict__, "name": "gpt-3.5-turbo-0301"}
+        **{**_CATSEEK_CHAT.__dict__, "name": "gpt-3.5-turbo-0301"}
     ),
     "gpt-3.5-turbo-0613": ChatModelInfo(
-        **{**_BITNET_CHAT.__dict__, "name": "gpt-3.5-turbo-0613"}
+        **{**_CATSEEK_CHAT.__dict__, "name": "gpt-3.5-turbo-0613"}
     ),
     "gpt-3.5-turbo-16k": ChatModelInfo(
-        **{**_BITNET_CHAT.__dict__, "name": "gpt-3.5-turbo-16k", "max_tokens": 8192}
+        **{**_CATSEEK_CHAT.__dict__, "name": "gpt-3.5-turbo-16k", "max_tokens": 16384}
     ),
     "gpt-3.5-turbo-16k-0613": ChatModelInfo(
-        **{**_BITNET_CHAT.__dict__, "name": "gpt-3.5-turbo-16k-0613", "max_tokens": 8192}
+        **{**_CATSEEK_CHAT.__dict__, "name": "gpt-3.5-turbo-16k-0613", "max_tokens": 16384}
     ),
-    "gpt-4": ChatModelInfo(**{**_BITNET_CHAT.__dict__, "name": "gpt-4"}),
-    "gpt-4-0314": ChatModelInfo(**{**_BITNET_CHAT.__dict__, "name": "gpt-4-0314"}),
-    "gpt-4-0613": ChatModelInfo(**{**_BITNET_CHAT.__dict__, "name": "gpt-4-0613"}),
+    "gpt-4": ChatModelInfo(**{**_CATSEEK_CHAT.__dict__, "name": "gpt-4"}),
+    "gpt-4-0314": ChatModelInfo(**{**_CATSEEK_CHAT.__dict__, "name": "gpt-4-0314"}),
+    "gpt-4-0613": ChatModelInfo(**{**_CATSEEK_CHAT.__dict__, "name": "gpt-4-0613"}),
     "gpt-4-32k": ChatModelInfo(
-        **{**_BITNET_CHAT.__dict__, "name": "gpt-4-32k", "max_tokens": 8192}
+        **{**_CATSEEK_CHAT.__dict__, "name": "gpt-4-32k", "max_tokens": 16384}
     ),
     "gpt-4-32k-0314": ChatModelInfo(
-        **{**_BITNET_CHAT.__dict__, "name": "gpt-4-32k-0314", "max_tokens": 8192}
+        **{**_CATSEEK_CHAT.__dict__, "name": "gpt-4-32k-0314", "max_tokens": 16384}
     ),
     "gpt-4-32k-0613": ChatModelInfo(
-        **{**_BITNET_CHAT.__dict__, "name": "gpt-4-32k-0613", "max_tokens": 8192}
+        **{**_CATSEEK_CHAT.__dict__, "name": "gpt-4-32k-0613", "max_tokens": 16384}
     ),
 }
 
 OPEN_AI_TEXT_MODELS = {
-    "bitnet-b1.58-text": TextModelInfo(
-        name="bitnet-b1.58-text",
+    f"{catseek_engine.MODEL_ID}-text": TextModelInfo(
+        name=f"{catseek_engine.MODEL_ID}-text",
         prompt_token_cost=0.0,
         completion_token_cost=0.0,
-        max_tokens=bitnet_engine.DEFAULT_N_CTX,
+        max_tokens=catseek_engine.DEFAULT_N_CTX,
     ),
     "text-davinci-003": TextModelInfo(
         name="text-davinci-003",
         prompt_token_cost=0.0,
         completion_token_cost=0.0,
-        max_tokens=bitnet_engine.DEFAULT_N_CTX,
+        max_tokens=catseek_engine.DEFAULT_N_CTX,
     ),
 }
 
 OPEN_AI_EMBEDDING_MODELS = {
+    "catseek-embed": EmbeddingModelInfo(
+        name="catseek-embed",
+        prompt_token_cost=0.0,
+        max_tokens=8191,
+        embedding_dimensions=catseek_engine.DEFAULT_EMBED_DIM,
+    ),
     "bitnet-embed": EmbeddingModelInfo(
         name="bitnet-embed",
         prompt_token_cost=0.0,
         max_tokens=8191,
-        embedding_dimensions=bitnet_engine.DEFAULT_EMBED_DIM,
+        embedding_dimensions=catseek_engine.DEFAULT_EMBED_DIM,
     ),
     "text-embedding-ada-002": EmbeddingModelInfo(
         name="text-embedding-ada-002",
         prompt_token_cost=0.0,
         max_tokens=8191,
-        embedding_dimensions=bitnet_engine.DEFAULT_EMBED_DIM,
+        embedding_dimensions=catseek_engine.DEFAULT_EMBED_DIM,
     ),
 }
 
@@ -96,8 +109,9 @@ OPEN_AI_MODELS: dict[str, ChatModelInfo | EmbeddingModelInfo | TextModelInfo] = 
 
 
 # Back-compat exports used by config / older imports.
-_resolve_model_path = bitnet_engine.resolve_chat_model_path
-get_bitnet_llm = bitnet_engine.get_chat_llm
+_resolve_model_path = catseek_engine.resolve_model_path
+get_bitnet_llm = catseek_engine.get_chat_llm
+get_catseek_llm = catseek_engine.get_chat_llm
 
 
 def meter_api(func: Callable):
@@ -116,10 +130,6 @@ def retry_api(
         def _wrapped(*args, **kwargs):
             import time
 
-            from colorama import Fore
-
-            from autogpt.logs import logger
-
             attempt = 0
             while True:
                 try:
@@ -129,10 +139,11 @@ def retry_api(
                     if attempt > max_retries:
                         raise
                     delay = backoff_base**attempt
-                    logger.warn(
-                        f"{Fore.YELLOW}BitNet call failed ({err}); "
-                        f"retrying in {delay:.1f}s ({attempt}/{max_retries}){Fore.RESET}"
-                    )
+                    if warn_user:
+                        logger.warn(
+                            f"{Fore.YELLOW}CatSeek call failed ({err}); "
+                            f"retrying in {delay:.1f}s ({attempt}/{max_retries}){Fore.RESET}"
+                        )
                     time.sleep(delay)
 
         return _wrapped
@@ -147,12 +158,12 @@ def create_chat_completion(
     *_,
     **kwargs,
 ) -> Any:
-    """Create a chat completion using the local BitNet engine."""
-    temperature = float(kwargs.get("temperature", 0.0) or 0.0)
-    max_tokens = int(kwargs.get("max_tokens") or bitnet_engine.DEFAULT_MAX_TOKENS)
-    model_name = kwargs.get("model") or "bitnet-b1.58"
+    """Create a chat completion using CatSeek-GPU 0.1."""
+    temperature = float(kwargs.get("temperature", 0.2) or 0.2)
+    max_tokens = int(kwargs.get("max_tokens") or catseek_engine.DEFAULT_MAX_TOKENS)
+    model_name = kwargs.get("model") or catseek_engine.MODEL_ID
 
-    response = bitnet_engine.create_chat_completion_raw(
+    response = catseek_engine.create_chat_completion_raw(
         messages,
         temperature=temperature,
         max_tokens=max_tokens,
@@ -176,12 +187,12 @@ def create_text_completion(
     *_,
     **kwargs,
 ) -> Any:
-    """Create a text completion using the local BitNet engine."""
-    temperature = float(kwargs.get("temperature", 0.0) or 0.0)
-    max_tokens = int(kwargs.get("max_tokens") or bitnet_engine.DEFAULT_MAX_TOKENS)
-    model_name = kwargs.get("model") or "bitnet-b1.58-text"
+    """Create a text completion using CatSeek-GPU 0.1."""
+    temperature = float(kwargs.get("temperature", 0.2) or 0.2)
+    max_tokens = int(kwargs.get("max_tokens") or catseek_engine.DEFAULT_MAX_TOKENS)
+    model_name = kwargs.get("model") or f"{catseek_engine.MODEL_ID}-text"
 
-    response = bitnet_engine.create_text_completion_raw(
+    response = catseek_engine.create_text_completion_raw(
         prompt,
         temperature=temperature,
         max_tokens=max_tokens,
@@ -223,10 +234,10 @@ def create_embedding(
     *_,
     **kwargs,
 ) -> Any:
-    """Create embeddings via BitNet embedding GGUF / chat fallback / hash."""
+    """Create embeddings via CatSeek hash embed (workspace-local)."""
     texts = _coerce_embedding_texts(input)
-    model_name = kwargs.get("model") or "bitnet-embed"
-    response = bitnet_engine.create_embedding_raw(texts)
+    model_name = kwargs.get("model") or "catseek-embed"
+    response = catseek_engine.create_embedding_raw(texts)
     response.model = model_name
 
     from autogpt.llm.api_manager import ApiManager

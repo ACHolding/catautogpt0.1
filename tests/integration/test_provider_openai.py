@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -15,29 +15,28 @@ def reset_api_manager():
     yield
 
 
-def _mock_llm_response(prompt_tokens=10, completion_tokens=20, content="ok"):
-    return {
-        "choices": [{"message": {"content": content}}],
-        "usage": {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-        },
-    }
+def _fake_response(prompt_tokens=10, completion_tokens=20, content="ok"):
+    return SimpleNamespace(
+        model="catseek-gpu-0.1",
+        usage=SimpleNamespace(
+            prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
+        ),
+        choices=[SimpleNamespace(message={"role": "assistant", "content": content})],
+    )
 
 
-class TestProviderBitNet:
+class TestProviderCatSeek:
     @staticmethod
     def test_create_chat_completion_updates_cost():
         messages = [
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": "Who won the world series in 2020?"},
         ]
-        model = "bitnet-b1.58"
-        mock_llm = MagicMock()
-        mock_llm.create_chat_completion.return_value = _mock_llm_response()
+        model = "catseek-gpu-0.1"
 
         with patch(
-            "autogpt.llm.providers.openai.get_bitnet_llm", return_value=mock_llm
+            "autogpt.llm.providers.catseek_engine.create_chat_completion_raw",
+            return_value=_fake_response(),
         ):
             response = openai.create_chat_completion(messages, model=model)
 
@@ -49,12 +48,11 @@ class TestProviderBitNet:
     @staticmethod
     def test_create_chat_completion_empty_messages():
         messages = []
-        model = "bitnet-b1.58"
-        mock_llm = MagicMock()
-        mock_llm.create_chat_completion.return_value = _mock_llm_response(0, 0, "")
+        model = "catseek-gpu-0.1"
 
         with patch(
-            "autogpt.llm.providers.openai.get_bitnet_llm", return_value=mock_llm
+            "autogpt.llm.providers.catseek_engine.create_chat_completion_raw",
+            return_value=_fake_response(0, 0, ""),
         ):
             openai.create_chat_completion(messages, model=model)
 
