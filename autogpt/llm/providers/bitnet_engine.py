@@ -143,6 +143,18 @@ def resolve_chat_model_path() -> Path:
     )
 
 
+def ensure_chat_model_path(*, auto_download: bool | None = None) -> Path:
+    """Resolve a chat GGUF, auto-downloading the official BitNet bake if needed."""
+    try:
+        return resolve_chat_model_path()
+    except FileNotFoundError:
+        from autogpt.llm.providers.bitnet_bake import ensure_bitnet_gguf
+
+        path = ensure_bitnet_gguf(auto_download=auto_download)
+        os.environ["BITNET_MODEL_PATH"] = str(path)
+        return path
+
+
 def resolve_embed_model_path() -> Path | None:
     """Optional BitNet embedding GGUF (BitNet-embedding-0.6B / 270M)."""
     raw = os.getenv("BITNET_EMBED_MODEL_PATH")
@@ -285,7 +297,7 @@ def _llama_kwargs(*, embedding: bool) -> dict[str, Any]:
 def get_chat_llm(force_reload: bool = False) -> Any:
     """Lazy-load chat model via llama-cpp-python (in-process, keeps KV cache warm)."""
     global _chat_llm, _chat_path, _warned_fallback
-    model_path = str(resolve_chat_model_path())
+    model_path = str(ensure_chat_model_path())
     if _chat_llm is not None and _chat_path == model_path and not force_reload:
         return _chat_llm
 
@@ -623,8 +635,8 @@ def create_embedding_raw(texts: list[str]) -> SimpleNamespace:
 
 
 def warm_start() -> Path:
-    """Resolve model, optionally warm-load in-process backend, return chat path."""
-    path = resolve_chat_model_path()
+    """Resolve model (auto-bake if needed), optionally warm-load, return chat path."""
+    path = ensure_chat_model_path()
     _validate_bitnetish(path)
     os.environ["BITNET_MODEL_PATH"] = str(path)
     backend = backend_name()

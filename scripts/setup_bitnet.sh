@@ -15,57 +15,23 @@ BUILD_CPP="${BITNET_BUILD_CPP:-0}"
 echo "==> Project root: $ROOT"
 echo "==> Model dir:    $MODEL_DIR"
 
-if ! command -v huggingface-cli >/dev/null 2>&1; then
-  echo "Installing huggingface_hub CLI..."
-  python3 -m pip install -U "huggingface_hub[cli]"
-fi
+python3 -m pip install -q "huggingface_hub>=0.26.0" >/dev/null
 
-mkdir -p "$(dirname "$MODEL_DIR")"
-echo "==> Downloading $HF_REPO ..."
-huggingface-cli download "$HF_REPO" --local-dir "$MODEL_DIR"
-
-GGUF=""
-for candidate in \
-  "$MODEL_DIR/ggml-model-i2_s.gguf" \
-  "$MODEL_DIR/BitNet-b1.58-2B-4T.i2_s.gguf"; do
-  if [[ -f "$candidate" ]]; then
-    GGUF="$candidate"
-    break
-  fi
-done
-if [[ -z "$GGUF" ]]; then
-  GGUF="$(find "$MODEL_DIR" -name '*.gguf' | head -n 1 || true)"
-fi
-if [[ -z "$GGUF" || ! -f "$GGUF" ]]; then
-  echo "ERROR: no .gguf found under $MODEL_DIR" >&2
-  exit 1
-fi
-
-echo "==> Chat GGUF: $GGUF"
-
-if [[ ! -f "$ROOT/.env" ]]; then
-  cp "$ROOT/.env.template" "$ROOT/.env"
-  echo "Created .env from template"
-fi
-
-# Upsert BITNET_MODEL_PATH in .env
-python3 - <<PY
+mkdir -p "$MODEL_DIR"
+echo "==> Baking $HF_REPO into $MODEL_DIR ..."
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" python3 - <<PY
 from pathlib import Path
-path = Path(r"$ROOT/.env")
-gguf = r"$GGUF"
-text = path.read_text() if path.exists() else ""
-lines = []
-found = False
-for line in text.splitlines():
-    if line.startswith("BITNET_MODEL_PATH="):
-        lines.append(f"BITNET_MODEL_PATH={gguf}")
-        found = True
-    else:
-        lines.append(line)
-if not found:
-    lines.append(f"BITNET_MODEL_PATH={gguf}")
-path.write_text("\n".join(lines) + "\n")
-print(f"Wrote BITNET_MODEL_PATH={gguf}")
+import os
+os.environ["BITNET_MODEL_DIR"] = r"$MODEL_DIR"
+os.environ["BITNET_HF_REPO"] = r"$HF_REPO"
+os.environ["BITNET_AUTO_DOWNLOAD"] = "True"
+from autogpt.llm.providers.bitnet_bake import ensure_bitnet_gguf, write_env_model_path
+env = Path(r"$ROOT") / ".env"
+if not env.exists() and (Path(r"$ROOT") / ".env.template").exists():
+    env.write_text((Path(r"$ROOT") / ".env.template").read_text())
+gguf = ensure_bitnet_gguf(project_root=Path(r"$ROOT"))
+write_env_model_path(gguf, env)
+print(gguf)
 PY
 
 if [[ "$BUILD_CPP" == "1" ]]; then

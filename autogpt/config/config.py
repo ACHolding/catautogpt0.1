@@ -390,25 +390,22 @@ class ConfigBuilder(Configurable[Config]):
 
 
 def check_bitnet_model(config: Config) -> None:
-    """Ensure a local BitNet GGUF model is available and warm-start the engine."""
-    from autogpt.llm.providers import bitnet_engine
+    """Ensure a local BitNet GGUF is available (auto-bake if missing) and warm-start."""
+    from autogpt.llm.providers import bitnet_bake, bitnet_engine
 
     if config.bitnet_model_path:
         os.environ.setdefault("BITNET_MODEL_PATH", str(config.bitnet_model_path))
 
     explicit = os.getenv("BITNET_MODEL_PATH") or os.getenv("LLM_MODEL_PATH")
     if explicit and explicit.strip() and not Path(explicit).expanduser().exists():
-        print(
-            Fore.RED
-            + f"BITNET_MODEL_PATH does not exist: {explicit}"
-            + Fore.RESET
-        )
+        # Stale path in .env — clear and let auto-bake recover.
         print(
             Fore.YELLOW
-            + "Fix the path in .env, or run: ./scripts/setup_bitnet.sh"
+            + f"BITNET_MODEL_PATH missing ({explicit}); attempting auto-bake…"
             + Fore.RESET
         )
-        raise SystemExit(2)
+        os.environ.pop("BITNET_MODEL_PATH", None)
+        os.environ.pop("LLM_MODEL_PATH", None)
 
     try:
         path = bitnet_engine.warm_start()
@@ -418,10 +415,7 @@ def check_bitnet_model(config: Config) -> None:
             Fore.YELLOW
             + "Download / setup:\n"
             + "  ./scripts/setup_bitnet.sh\n"
-            + "  # or manually:\n"
-            + "  huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf "
-            + "--local-dir models/BitNet-b1.58-2B-4T\n"
-            + "  echo BITNET_MODEL_PATH=models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf >> .env"
+            + "  # or set BITNET_AUTO_DOWNLOAD=True and retry"
             + Fore.RESET
         )
         raise SystemExit(2) from err
@@ -439,6 +433,15 @@ def check_bitnet_model(config: Config) -> None:
 
     config.bitnet_model_path = str(path)
     os.environ["BITNET_MODEL_PATH"] = str(path)
+
+    # Persist path into .env so the next vibe-check boots instantly.
+    try:
+        env_file = Path(config.workdir or ".") / ".env"
+        if config.workdir:
+            env_file = Path(config.workdir) / ".env"
+        bitnet_bake.write_env_model_path(Path(path), env_file)
+    except Exception:
+        pass
 
 
 # Backwards-compatible name used by older call sites / tests.
