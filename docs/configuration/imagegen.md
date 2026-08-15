@@ -1,22 +1,11 @@
 # 🖼 Image Generation configuration
 
-| Config variable  | Values                          |                      |
-| ---------------- | ------------------------------- | -------------------- |
-| `IMAGE_PROVIDER` | `dalle` `huggingface` `sdwebui` | **default: `dalle`** |
+| Config variable  | Values                 |                             |
+| ---------------- | ---------------------- | --------------------------- |
+| `IMAGE_PROVIDER` | `huggingface` `sdwebui` | **default: `huggingface`** |
 
-## DALL-e
-
-In `.env`, make sure `IMAGE_PROVIDER` is commented (or set to `dalle`):
-
-```ini
-# IMAGE_PROVIDER=dalle    # this is the default
-```
-
-Further optional configuration:
-
-| Config variable  | Values             |                |
-| ---------------- | ------------------ | -------------- |
-| `IMAGE_SIZE`     | `256` `512` `1024` | default: `256` |
+!!! note
+    OpenAI DALL-E has been removed in this BitNet fork.
 
 ## Hugging Face
 

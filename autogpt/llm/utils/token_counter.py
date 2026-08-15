@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from typing import List, overload
 
-import tiktoken
-
+from autogpt.compat import tiktoken_lib
 from autogpt.llm.base import Message
 from autogpt.logs import logger
 
@@ -37,7 +36,7 @@ def count_message_tokens(
     if isinstance(messages, Message):
         messages = [messages]
 
-    if model.startswith("gpt-3.5-turbo"):
+    if model.startswith("gpt-3.5-turbo") or model.startswith("bitnet"):
         tokens_per_message = (
             4  # every message follows <|start|>{role/name}\n{content}<|end|>\n
         )
@@ -54,10 +53,10 @@ def count_message_tokens(
             " information on how messages are converted to tokens."
         )
     try:
-        encoding = tiktoken.encoding_for_model(encoding_model)
+        encoding = tiktoken_lib.encoding_for_model(encoding_model)
     except KeyError:
         logger.warn("Warning: model not found. Using cl100k_base encoding.")
-        encoding = tiktoken.get_encoding("cl100k_base")
+        encoding = tiktoken_lib.get_encoding("cl100k_base")
 
     num_tokens = 0
     for message in messages:
@@ -81,5 +80,5 @@ def count_string_tokens(string: str, model_name: str) -> int:
     Returns:
         int: The number of tokens in the text string.
     """
-    encoding = tiktoken.encoding_for_model(model_name)
+    encoding = tiktoken_lib.encoding_for_model(model_name)
     return len(encoding.encode(string))

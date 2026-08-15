@@ -54,8 +54,7 @@ def get_embedding(
 
     logger.debug(
         f"Getting embedding{f's for {len(input)} inputs' if multiple else ''}"
-        f" with model '{model}'"
-        + (f" via Azure deployment '{kwargs['engine']}'" if config.use_azure else "")
+        f" with model '{model}' (local BitNet)"
     )
 
     embeddings = iopenai.create_embedding(

@@ -37,8 +37,8 @@ Demo made by <a href=https://twitter.com/BlakeWerlinger>Blake Werlinger</a>
 ## Quickstart
 
 0. Check out the [wiki](https://github.com/Significant-Gravitas/Nexus/wiki)
-1. Get an OpenAI [API Key](https://platform.openai.com/account/api-keys)
-2. Download the [latest release](https://github.com/Significant-Gravitas/Auto-GPT/releases/latest)
+1. Download a BitNet GGUF model and set `BITNET_MODEL_PATH` in `.env` (see `.env.template`)
+2. Install dependencies (`pip install -r requirements.txt`, including `llama-cpp-python`)
 3. Follow the [installation instructions][docs/setup]
 4. Configure any additional features you want, or install some [plugins][docs/plugins]
 5. [Run][docs/usage] the app

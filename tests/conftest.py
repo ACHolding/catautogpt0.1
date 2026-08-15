@@ -49,8 +49,8 @@ def config(
     temp_plugins_config_file: str, mocker: MockerFixture, workspace: Workspace
 ) -> Config:
     config = ConfigBuilder.build_config_from_env(workspace.root.parent)
-    if not os.environ.get("OPENAI_API_KEY"):
-        os.environ["OPENAI_API_KEY"] = "sk-dummy"
+    if not os.environ.get("BITNET_MODEL_PATH"):
+        os.environ["BITNET_MODEL_PATH"] = "/tmp/dummy-bitnet.gguf"
 
     config.workspace_path = workspace.root
 

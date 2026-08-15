@@ -5,28 +5,23 @@
 Choose an environment to run Auto-GPT in (pick one):
 
   - [Docker](https://docs.docker.com/get-docker/) (*recommended*)
-  - Python 3.10 or later (instructions: [for Windows](https://www.tutorialspoint.com/how-to-install-python-in-windows))
+  - Python 3.14 or later (instructions: [for Windows](https://www.tutorialspoint.com/how-to-install-python-in-windows))
   - [VSCode + devcontainer](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
 
 
-## 🗝️ Getting an API key
+## 🗝️ Getting a BitNet model
 
-Get your OpenAI API key from: [https://platform.openai.com/account/api-keys](https://platform.openai.com/account/api-keys).
+This fork runs a **local BitNet LLM** via `llama-cpp-python` (no OpenAI API key).
 
-!!! attention
-    To use the OpenAI API with Auto-GPT, we strongly recommend **setting up billing**
-    (AKA paid account). Free accounts are [limited][openai/api limits] to 3 API calls per
-    minute, which can cause the application to crash.
+1. Install [huggingface-cli](https://huggingface.co/docs/huggingface_hub/guides/cli) if needed.
+2. Download a BitNet GGUF, for example:
 
-    You can set up a paid account at [Manage account > Billing > Overview](https://platform.openai.com/account/billing/overview).
+    ```shell
+    huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf \
+      --local-dir models/BitNet-b1.58-2B-4T
+    ```
 
-[openai/api limits]: https://platform.openai.com/docs/guides/rate-limits/overview#:~:text=Free%20trial%20users,RPM%0A40%2C000%20TPM
-
-!!! important
-    It's highly recommended that you keep track of your API costs on [the Usage page](https://platform.openai.com/account/usage).
-    You can also set limits on how much you spend on [the Usage limits page](https://platform.openai.com/account/billing/limits).
-
-![For OpenAI API key to work, set up paid account at OpenAI API > Billing](./imgs/openai-api-key-billing-paid-account.png)
+3. Set `BITNET_MODEL_PATH` in `.env` to the `.gguf` file path.
 
 
 ## Setting up Auto-GPT
@@ -123,9 +118,9 @@ Get your OpenAI API key from: [https://platform.openai.com/account/api-keys](htt
 2. Create a copy of `.env.template` and call it `.env`;
     if you're already in a command prompt/terminal window: `cp .env.template .env`.
 3. Open the `.env` file in a text editor.
-4. Find the line that says `OPENAI_API_KEY=`.
-5. After the `=`, enter your unique OpenAI API Key *without any quotes or spaces*.
-6. Enter any other API keys or tokens for services you would like to use.
+4. Find the line that says `BITNET_MODEL_PATH=`.
+5. After the `=`, enter the path to your BitNet `.gguf` model *without any quotes*.
+6. Enter any other API keys or tokens for services you would like to use (image gen, search, etc.).
 
     !!! note
         To activate and adjust a setting, remove the `# ` prefix.

@@ -1,0 +1,50 @@
+# Bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Virtualenvs
+.venv/
+venv/
+ENV/
+
+# Local env / secrets
+.env
+.env.*
+!.env.template
+azure.yaml
+ai_settings.yaml
+plugins_config.yaml
+
+# Runtime artifacts
+logs/
+auto_gpt_workspace/
+data/*
+!data/.keep
+*.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Temp
+tmp/
+temp/
+
+# Generated OpenAI plugin clients from tests
+tests/unit/data/test_plugins/openai/

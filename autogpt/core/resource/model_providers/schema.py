@@ -2,7 +2,7 @@ import abc
 import enum
 from typing import Callable, ClassVar
 
-from pydantic import BaseModel, Field, SecretStr, validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from autogpt.core.configuration import UserConfigurable
 from autogpt.core.resource.schema import (
@@ -77,13 +77,12 @@ class ModelProviderCredentials(ProviderCredentials):
     def unmasked(self) -> dict:
         return unmask(self)
 
-    class Config:
-        extra = "ignore"
+    model_config = ConfigDict(extra="ignore")
 
 
 def unmask(model: BaseModel):
     unmasked_fields = {}
-    for field_name, field in model.__fields__.items():
+    for field_name in model.model_fields:
         value = getattr(model, field_name)
         if isinstance(value, SecretStr):
             unmasked_fields[field_name] = value.get_secret_value()
@@ -132,7 +131,7 @@ class ModelProviderBudget(ProviderBudget):
 
 
 class ModelProviderSettings(ProviderSettings):
-    resource_type = ResourceType.MODEL
+    resource_type: ResourceType = ResourceType.MODEL
     credentials: ModelProviderCredentials
     budget: ModelProviderBudget
 
@@ -159,7 +158,7 @@ class ModelProvider(abc.ABC):
 class EmbeddingModelProviderModelInfo(ModelProviderModelInfo):
     """Struct for embedding model information."""
 
-    model_service = ModelProviderService.EMBEDDING
+    service: ModelProviderService = ModelProviderService.EMBEDDING
     embedding_dimensions: int
 
 
@@ -168,8 +167,8 @@ class EmbeddingModelProviderModelResponse(ModelProviderModelResponse):
 
     embedding: Embedding = Field(default_factory=list)
 
+    @field_validator("completion_tokens_used")
     @classmethod
-    @validator("completion_tokens_used")
     def _verify_no_completion_tokens_used(cls, v):
         if v > 0:
             raise ValueError("Embeddings should not have completion tokens used.")
@@ -196,7 +195,7 @@ class EmbeddingModelProvider(ModelProvider):
 class LanguageModelProviderModelInfo(ModelProviderModelInfo):
     """Struct for language model information."""
 
-    model_service = ModelProviderService.LANGUAGE
+    service: ModelProviderService = ModelProviderService.LANGUAGE
     max_tokens: int
 
 

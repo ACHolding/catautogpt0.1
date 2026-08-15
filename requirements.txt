@@ -1,56 +1,56 @@
 beautifulsoup4>=4.12.2
-colorama==0.4.6
-distro==1.8.0
-openai==0.27.8
+colorama>=0.4.6
+distro>=1.8.0
 playsound==1.2.2
-python-dotenv==0.21
-pyyaml>=6.0.1
-PyPDF2
+python-dotenv>=1.0.0
+pyyaml>=6.0.2
+pypdf>=5.0.0
 python-docx
 markdown
 pylatexenc
-readability-lxml==0.8.1
-requests
-tiktoken==0.3.3
-gTTS==2.3.1
-docker
-duckduckgo-search==3.0.2
+readability-lxml>=0.8.1
+requests>=2.32.0
+tiktoken>=0.12.0
+gTTS>=2.5.0
+docker>=7.0.0
+duckduckgo-search>=3.0.2
 google-api-python-client #(https://developers.google.com/custom-search/v1/overview)
-pinecone-client==2.2.1
-redis
-orjson==3.8.10
+pinecone-client>=2.2.1
+redis>=5.0.0
+orjson>=3.10.0
 ftfy>=6.1.1
-Pillow
-selenium==4.1.4
-webdriver-manager
-jsonschema
-click
-charset-normalizer>=3.1.0
-spacy>=3.0.0,<4.0.0
-en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.5.0/en_core_web_sm-3.5.0-py3-none-any.whl
-prompt_toolkit>=3.0.38
-pydantic
+Pillow>=10.0.0
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+jsonschema>=4.20.0
+click>=8.1.0
+charset-normalizer>=3.3.0
+spacy>=3.7.0,<4.0.0
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+prompt_toolkit>=3.0.43
+pydantic>=2.10.0,<3.0
 inflection
 agbenchmark
+llama-cpp-python>=0.3.0
 
 # web server
-fastapi
-uvicorn
+fastapi>=0.115.0
+uvicorn>=0.30.0
 
 ##Dev
 coverage
 flake8
-numpy
+numpy>=2.0.0
 pre-commit
-black
-isort
-gitpython==3.1.31
+black>=24.0.0
+isort>=5.13.0
+gitpython>=3.1.43
 auto-gpt-plugin-template @ git+https://github.com/Significant-Gravitas/Auto-GPT-Plugin-Template@0.1.0
 mkdocs
 mkdocs-material
 mkdocs-table-reader-plugin
 pymdown-extensions
-mypy
+mypy>=1.13.0
 types-Markdown
 types-beautifulsoup4
 types-colorama
@@ -65,9 +65,9 @@ openapi-python-client==0.13.4
 agent-protocol>=0.1.1
 
 # Testing dependencies
-pytest
+pytest>=8.0.0
 asynctest
-pytest-asyncio
+pytest-asyncio>=0.24.0
 pytest-benchmark
 pytest-cov
 pytest-integration
