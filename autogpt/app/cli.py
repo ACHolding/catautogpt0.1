@@ -117,7 +117,12 @@ def main(
     # Put imports inside function to avoid importing everything when starting the CLI
     from autogpt.app.main import run_auto_gpt
 
-    if ctx.invoked_subcommand is None:
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # Wrap the agent so unexpected exceptions exit cleanly (exit 1) instead of
+    # dumping a half-handled traceback through Click in continuous mode.
+    try:
         run_auto_gpt(
             continuous=continuous,
             continuous_limit=continuous_limit,
@@ -141,6 +146,15 @@ def main(
             ai_role=ai_role,
             ai_goals=ai_goal,
         )
+    except SystemExit:
+        raise
+    except click.ClickException:
+        raise
+    except Exception as err:
+        click.echo(f"Auto-GPT crashed: {err}", err=True)
+        if debug:
+            raise
+        raise SystemExit(1) from err
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ import logging
 import typing
 from pathlib import Path
 
-from pydantic import SecretField
+from pydantic import SecretBytes, SecretStr
 
 from autogpt.core.configuration import (
     Configurable,
@@ -167,10 +167,19 @@ class SimpleWorkspace(Configurable, Workspace):
         settings.workspace.configuration.root = str(workspace_root)
 
         with (workspace_root / "agent_settings.json").open("w") as f:
-            settings_json = settings.json(
-                encoder=lambda x: x.get_secret_value()
-                if isinstance(x, SecretField)
-                else x,
+
+            def _reveal_secrets(value):
+                if isinstance(value, (SecretStr, SecretBytes)):
+                    return value.get_secret_value()
+                if isinstance(value, dict):
+                    return {k: _reveal_secrets(v) for k, v in value.items()}
+                if isinstance(value, list):
+                    return [_reveal_secrets(v) for v in value]
+                return value
+
+            settings_json = json.dumps(
+                _reveal_secrets(settings.model_dump()),
+                default=str,
             )
             f.write(settings_json)
 
@@ -190,4 +199,4 @@ class SimpleWorkspace(Configurable, Workspace):
         with (workspace_root / "agent_settings.json").open("r") as f:
             agent_settings = json.load(f)
 
-        return AgentSettings.parse_obj(agent_settings)
+        return AgentSettings.model_validate(agent_settings)

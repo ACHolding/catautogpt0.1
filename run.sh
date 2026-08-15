@@ -20,7 +20,7 @@ function find_python_command() {
 
 PYTHON_CMD=$(find_python_command)
 
-if $PYTHON_CMD -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"; then
+if $PYTHON_CMD -c "import sys; sys.exit(0 if sys.version_info >= (3, 14) else 1)"; then
     CHECK_OUT=$($PYTHON_CMD scripts/check_requirements.py requirements.txt 2>&1) || {
         echo "$CHECK_OUT"
         # Install only the packages reported missing (second line of checker output).
@@ -49,11 +49,19 @@ if $PYTHON_CMD -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)
     # Ensure the project root is importable when not installed as a package.
     export PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:$PYTHONPATH}"
     $PYTHON_CMD -m autogpt "$@"
-    # Only pause when running interactively in a terminal.
-    if [ -t 0 ] && [ -t 1 ]; then
+    status=$?
+    # Only pause when running interactively, and never in continuous mode.
+    continuous=0
+    for arg in "$@"; do
+        case "$arg" in
+            -c|--continuous) continuous=1 ;;
+        esac
+    done
+    if [ -t 0 ] && [ -t 1 ] && [ "$continuous" -eq 0 ]; then
         read -p "Press any key to continue..."
     fi
+    exit $status
 else
-    echo "Python 3.10 or higher is required to run Auto GPT."
+    echo "Python 3.14 or higher is required to run Auto GPT."
     exit 1
 fi

@@ -2,7 +2,7 @@
 """Tests for JSONFileMemory class"""
 import pytest
 
-import orjson
+from autogpt.compat import json_lib
 from autogpt.config import Config
 from autogpt.memory.vector import JSONFileMemory, MemoryItem
 from autogpt.workspace import Workspace
@@ -34,7 +34,7 @@ def test_json_memory_init_with_backing_invalid_file(
     index_file.touch()
 
     raw_data = {"texts": ["test"]}
-    data = orjson.dumps(raw_data, option=JSONFileMemory.SAVE_OPTIONS)
+    data = json_lib.dumps(raw_data, option=JSONFileMemory.SAVE_OPTIONS)
     with index_file.open("wb") as f:
         f.write(data)
 
