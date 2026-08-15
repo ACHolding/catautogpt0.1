@@ -1,8 +1,9 @@
 """Text processing functions"""
+from __future__ import annotations
+
+import re
 from math import ceil
 from typing import Optional
-
-import spacy
 
 from autogpt.compat import tiktoken_lib
 from autogpt.config import Config
@@ -10,6 +11,56 @@ from autogpt.llm.base import ChatSequence
 from autogpt.llm.providers.openai import OPEN_AI_MODELS
 from autogpt.llm.utils import count_string_tokens, create_chat_completion
 from autogpt.logs import logger
+
+# spaCy/thinc often break on Python 3.14 when NumPy ABI drifts (BitNet/torch pins).
+# Never import spaCy at module load — it would crash Auto-GPT before BitNet starts.
+_SPACY = None
+_SPACY_LOAD_TRIED = False
+
+_SENTENCE_SPLIT_RE = re.compile(
+    r"(?<=[.!?])\s+(?=[A-Z0-9\"'(\[])|(?<=\n)\s*"
+)
+
+
+def _load_spacy():
+    """Lazy-import spaCy; return None when unavailable on this Python/numpy stack."""
+    global _SPACY, _SPACY_LOAD_TRIED
+    if _SPACY_LOAD_TRIED:
+        return _SPACY
+    _SPACY_LOAD_TRIED = True
+    try:
+        import spacy as spacy_mod
+
+        _SPACY = spacy_mod
+        return _SPACY
+    except Exception as err:  # ImportError / binary ABI errors
+        logger.warn(
+            "spaCy unavailable "
+            f"({err}); using regex sentence splitting. "
+            "Fix with: python3 -m pip install -U 'numpy>=2' spacy"
+        )
+        return None
+
+
+def _split_sentences(text: str, language_model: str) -> list[str]:
+    """Sentence-split via spaCy when healthy; otherwise a regex fallback."""
+    spacy_mod = _load_spacy()
+    if spacy_mod is not None:
+        try:
+            nlp = spacy_mod.load(language_model)
+            nlp.add_pipe("sentencizer")
+            doc = nlp(text)
+            sentences = [sentence.text.strip() for sentence in doc.sents]
+            return [s for s in sentences if s]
+        except Exception as err:
+            logger.warn(f"spaCy sentencizer failed ({err}); using regex fallback")
+
+    # Lightweight fallback: split on end punctuation + whitespace / newlines.
+    parts = [p.strip() for p in _SENTENCE_SPLIT_RE.split(text) if p and p.strip()]
+    if parts:
+        return parts
+    stripped = text.strip()
+    return [stripped] if stripped else []
 
 
 def batch(iterable, max_batch_length: int, overlap: int = 0):
@@ -71,7 +122,7 @@ def summarize_text(
     instruction: Optional[str] = None,
     question: Optional[str] = None,
 ) -> tuple[str, None | list[tuple[str, str]]]:
-    """Summarize text using the OpenAI API
+    """Summarize text using the local BitNet LLM
 
     Args:
         text (str): The text to summarize
@@ -186,10 +237,7 @@ def split_text(
     n_chunks = ceil(text_length / max_length)
     target_chunk_length = ceil(text_length / n_chunks)
 
-    nlp: spacy.language.Language = spacy.load(config.browse_spacy_language_model)
-    nlp.add_pipe("sentencizer")
-    doc = nlp(text)
-    sentences = [sentence.text.strip() for sentence in doc.sents]
+    sentences = _split_sentences(text, config.browse_spacy_language_model)
 
     current_chunk: list[str] = []
     current_chunk_length = 0
