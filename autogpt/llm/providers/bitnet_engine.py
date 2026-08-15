@@ -1,14 +1,16 @@
 """Real BitNet inference engine for Auto-GPT.
 
 BitNet b1.58 (microsoft/BitNet-b1.58-2B-4T) is a native 1.58-bit LLM that uses the
-LLaMA 3 tokenizer and chat template. Official kernels live in microsoft/BitNet
-(bitnet.cpp). This module:
+LLaMA 3 tokenizer and chat template. Official ``i2_s`` GGUFs only load in
+microsoft/BitNet (bitnet.cpp) — stock llama.cpp / llama-cpp-python fails with
+"Failed to load model from file".
 
-1. Prefers a compiled ``bitnet.cpp`` ``llama-cli`` when ``BITNET_HOME`` /
-   ``BITNET_CLI`` is set (lossless ternary kernels).
-2. Otherwise uses ``llama-cpp-python`` with BitNet-tuned load/generate settings
-   and the official LLaMA-3 chat template (works for development; warn that
-   full BitNet speed needs bitnet.cpp).
+This module:
+
+1. Detects official BitNet i2_s GGUFs and routes them through bitnet.cpp
+   ``llama-cli`` (auto-clones/builds under ``third_party/BitNet`` when
+   ``BITNET_AUTO_BUILD=True``).
+2. Uses ``llama-cpp-python`` only for non-i2_s / experimental GGUFs.
 3. Optionally loads a BitNet embedding GGUF via ``BITNET_EMBED_MODEL_PATH``.
 """
 
@@ -16,7 +18,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import platform
 import shutil
 import subprocess
 import threading
@@ -184,38 +185,11 @@ def resolve_embed_model_path() -> Path | None:
 
 def find_bitnet_cli() -> Path | None:
     """Locate microsoft/BitNet ``llama-cli`` (bitnet.cpp build)."""
-    explicit = os.getenv("BITNET_CLI")
-    if explicit:
-        path = Path(explicit).expanduser()
-        return path if path.is_file() else None
+    from autogpt.llm.providers.bitnet_cpp import find_llama_cli
 
-    home = os.getenv("BITNET_HOME")
-    search: list[Path] = []
-    if home:
-        search.append(Path(home).expanduser())
-    search.extend(
-        [
-            project_root() / "third_party" / "BitNet",
-            project_root() / "BitNet",
-            Path.home() / "BitNet",
-        ]
-    )
-
-    bin_names = ["llama-cli"]
-    if platform.system() == "Windows":
-        bin_names = ["llama-cli.exe", "llama-cli"]
-
-    for base in search:
-        candidates = [
-            base / "build" / "bin" / "Release" / bin_names[0],
-            base / "build" / "bin" / bin_names[0],
-        ]
-        for name in bin_names[1:]:
-            candidates.append(base / "build" / "bin" / "Release" / name)
-            candidates.append(base / "build" / "bin" / name)
-        for c in candidates:
-            if c.is_file() and os.access(c, os.X_OK):
-                return c
+    cli = find_llama_cli()
+    if cli is not None:
+        return cli
 
     which = shutil.which("llama-cli")
     if which and _env_bool("BITNET_USE_SYSTEM_LLAMA_CLI", False):
@@ -223,14 +197,31 @@ def find_bitnet_cli() -> Path | None:
     return None
 
 
+def requires_bitnet_cpp(path: Path | None = None) -> bool:
+    """Official BitNet i2_s GGUFs cannot load in stock llama-cpp-python."""
+    if _env_bool("BITNET_FORCE_LLAMA_CPP", False):
+        return False
+    from autogpt.llm.providers.bitnet_cpp import is_i2s_bitnet_gguf
+
+    try:
+        target = path or resolve_chat_model_path()
+    except FileNotFoundError:
+        return True
+    return is_i2s_bitnet_gguf(Path(target))
+
+
 def backend_name() -> str:
     forced = (os.getenv("BITNET_BACKEND") or "auto").strip().lower()
     if forced in {"bitnet.cpp", "cli", "bitnet"}:
         return "bitnet.cpp" if find_bitnet_cli() else "missing-cli"
     if forced in {"llama-cpp", "llamacpp", "python"}:
+        if requires_bitnet_cpp():
+            # i2_s always needs bitnet.cpp — ignore forced llama-cpp.
+            return "bitnet.cpp" if find_bitnet_cli() else "missing-cli"
         return "llama-cpp-python"
+    if requires_bitnet_cpp():
+        return "bitnet.cpp" if find_bitnet_cli() else "missing-cli"
     return "bitnet.cpp" if find_bitnet_cli() else "llama-cpp-python"
-
 
 def apply_llama3_chat_template(
     messages: Sequence[dict[str, str]],
@@ -295,9 +286,18 @@ def _llama_kwargs(*, embedding: bool) -> dict[str, Any]:
 
 
 def get_chat_llm(force_reload: bool = False) -> Any:
-    """Lazy-load chat model via llama-cpp-python (in-process, keeps KV cache warm)."""
+    """Lazy-load chat model via llama-cpp-python (non-i2_s GGUFs only)."""
     global _chat_llm, _chat_path, _warned_fallback
     model_path = str(ensure_chat_model_path())
+    path = Path(model_path)
+
+    if requires_bitnet_cpp(path):
+        raise RuntimeError(
+            "Official BitNet i2_s GGUF cannot be loaded with llama-cpp-python. "
+            "Use bitnet.cpp (BITNET_AUTO_BUILD / BITNET_HOME). "
+            f"model={model_path}"
+        )
+
     if _chat_llm is not None and _chat_path == model_path and not force_reload:
         return _chat_llm
 
@@ -305,12 +305,11 @@ def get_chat_llm(force_reload: bool = False) -> Any:
         from llama_cpp import Llama
     except ImportError as err:
         raise SystemExit(
-            "llama-cpp-python is required for BitNet (in-process) inference. "
+            "llama-cpp-python is required for non-i2_s GGUF inference. "
             "Install with: pip install llama-cpp-python\n"
-            "For official BitNet kernels, build microsoft/BitNet and set BITNET_HOME."
+            "For official BitNet i2_s, build microsoft/BitNet and set BITNET_HOME."
         ) from err
 
-    path = Path(model_path)
     _validate_bitnetish(path)
     kwargs = _llama_kwargs(embedding=False)
 
@@ -319,9 +318,8 @@ def get_chat_llm(force_reload: bool = False) -> Any:
         logger.typewriter_log(
             "BitNet: ",
             Fore.YELLOW,
-            "using llama-cpp-python fallback. For real ternary kernels / speed, "
-            "build https://github.com/microsoft/BitNet and set BITNET_HOME "
-            "(or BITNET_CLI). See ./scripts/setup_bitnet.sh",
+            "using llama-cpp-python (non-i2_s GGUF). Official BitNet kernels need "
+            "bitnet.cpp — see ./scripts/setup_bitnet.sh",
         )
 
     logger.typewriter_log(
@@ -339,7 +337,14 @@ def get_chat_llm(force_reload: bool = False) -> Any:
         kwargs.pop("chat_format", None)
         kwargs.pop("flash_attn", None)
         logger.warn(f"BitNet reload without chat_format ({first_err})")
-        _chat_llm = Llama(model_path=model_path, **kwargs)
+        try:
+            _chat_llm = Llama(model_path=model_path, **kwargs)
+        except Exception as second_err:
+            raise RuntimeError(
+                f"Failed to load GGUF with llama-cpp-python: {second_err}\n"
+                "If this is an official BitNet i2_s model, set BITNET_AUTO_BUILD=True "
+                "or BITNET_BUILD_CPP=1 ./scripts/setup_bitnet.sh"
+            ) from second_err
 
     _chat_path = model_path
     return _chat_llm
@@ -350,6 +355,13 @@ def get_embed_llm(force_reload: bool = False) -> Any | None:
     global _embed_llm, _embed_path
     path = resolve_embed_model_path()
     if path is None:
+        return None
+    if requires_bitnet_cpp(path):
+        # Embedding i2_s also needs bitnet.cpp; skip in-process load.
+        logger.warn(
+            "BitNet embed GGUF looks like i2_s — skipping llama-cpp load; "
+            "using hash embeddings unless a llama.cpp-compatible embed GGUF is set."
+        )
         return None
     model_path = str(path)
     if _embed_llm is not None and _embed_path == model_path and not force_reload:
@@ -366,22 +378,30 @@ def get_embed_llm(force_reload: bool = False) -> Any | None:
         Fore.GREEN,
         f"loading embedding model {model_path}",
     )
-    _embed_llm = Llama(model_path=model_path, **kwargs)
+    try:
+        _embed_llm = Llama(model_path=model_path, **kwargs)
+    except Exception as err:
+        logger.warn(f"BitNet embed model load failed ({err})")
+        return None
     _embed_path = model_path
     return _embed_llm
+
+
+def _estimate_tokens(text: str) -> int:
+    # LLaMA-ish heuristic when bitnet.cpp CLI has no in-process tokenizer.
+    return max(1, (len(text) + 3) // 4)
 
 
 def tokenize_count(text: str) -> int:
     """Count tokens with the loaded BitNet tokenizer.
 
-    Raises if the chat model is not warm-loaded yet so callers can fall back
-    to an approximate tokenizer without accidentally spawning a model load.
+    Falls back to a char heuristic when only bitnet.cpp CLI is available
+    (official i2_s path never loads llama-cpp-python).
     """
     if _chat_llm is None:
-        raise RuntimeError("BitNet chat model is not loaded")
+        return _estimate_tokens(text)
     tokens = _chat_llm.tokenize(text.encode("utf-8"), add_bos=False)
     return len(tokens)
-
 
 def count_chat_tokens(messages: Sequence[dict[str, str]]) -> int:
     prompt = apply_llama3_chat_template(messages, add_generation_prompt=True)
@@ -403,7 +423,14 @@ def _complete_via_bitnet_cli(
 ) -> tuple[str, int, int]:
     cli = find_bitnet_cli()
     if cli is None:
-        raise FileNotFoundError("bitnet.cpp llama-cli not found")
+        raise FileNotFoundError("bitnet.cpp llama-cli/llama-completion not found")
+
+    # Newer BitNet builds split interactive chat (llama-cli) from one-shot
+    # completion (llama-completion). Prefer the latter for agent loops.
+    if cli.name.startswith("llama-cli"):
+        sibling = cli.with_name(cli.name.replace("llama-cli", "llama-completion", 1))
+        if sibling.is_file() and os.access(sibling, os.X_OK):
+            cli = sibling
 
     model = resolve_chat_model_path()
     prompt = apply_llama3_chat_template(messages, add_generation_prompt=True)
@@ -424,13 +451,18 @@ def _complete_via_bitnet_cli(
         str(temperature),
         "-ngl",
         str(_env_int("BITNET_N_GPU_LAYERS", 0)),
+        "-no-cnv",
         "-p",
         prompt,
         "--no-display-prompt",
     ]
+    if _env_bool("BITNET_CLI_JINJA", True):
+        cmd.append("--jinja")
     # Stop at end-of-turn when the build supports it.
     if _env_bool("BITNET_CLI_STOP", True):
         cmd.extend(["--reverse-prompt", "<|eot_id|>"])
+
+    env = os.environ.copy()
 
     logger.debug(f"BitNet CLI: {' '.join(cmd[:8])} ...")
     proc = subprocess.run(
@@ -439,13 +471,24 @@ def _complete_via_bitnet_cli(
         text=True,
         check=False,
         timeout=_env_int("BITNET_CLI_TIMEOUT", 600),
+        env=env,
     )
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip()
         raise RuntimeError(f"bitnet.cpp failed (code {proc.returncode}): {err[:800]}")
 
-    content = _strip_special_tokens(proc.stdout or "")
-    # CLI does not always report usage; estimate from tokenizer if in-process available.
+    # llama-completion prints sampler logs to stdout; keep the last non-log chunk.
+    raw = (proc.stdout or "").strip()
+    content_lines = [
+        ln
+        for ln in raw.splitlines()
+        if ln.strip()
+        and not ln.strip().startswith("common_perf_print")
+        and "sampler " not in ln
+        and "system_info:" not in ln
+        and "generate:" not in ln
+    ]
+    content = _strip_special_tokens("\n".join(content_lines) if content_lines else raw)
     prompt_tokens = tokenize_count(prompt)
     completion_tokens = tokenize_count(content) if content else 0
     return content, prompt_tokens, completion_tokens
@@ -522,26 +565,25 @@ def create_chat_completion_raw(
     ]
     max_tokens = max(1, int(max_tokens or DEFAULT_MAX_TOKENS))
     temperature = float(temperature or 0.0)
+    path = ensure_chat_model_path()
+    must_use_cpp = requires_bitnet_cpp(path)
 
     with _CHAT_LOCK:
         backend = backend_name()
-        if backend == "bitnet.cpp":
-            try:
-                content, prompt_tokens, completion_tokens = _complete_via_bitnet_cli(
-                    cleaned, temperature=temperature, max_tokens=max_tokens
-                )
-            except Exception as err:
-                logger.warn(
-                    f"{Fore.YELLOW}bitnet.cpp CLI failed ({err}); "
-                    f"falling back to llama-cpp-python{Fore.RESET}"
-                )
-                content, prompt_tokens, completion_tokens = _complete_via_llama_cpp(
-                    cleaned, temperature=temperature, max_tokens=max_tokens
-                )
+        if backend == "missing-cli" or (must_use_cpp and find_bitnet_cli() is None):
+            from autogpt.llm.providers.bitnet_cpp import ensure_bitnet_cli
+
+            ensure_bitnet_cli(gguf=path)
+            backend = backend_name()
+
+        if backend == "bitnet.cpp" or must_use_cpp:
+            content, prompt_tokens, completion_tokens = _complete_via_bitnet_cli(
+                cleaned, temperature=temperature, max_tokens=max_tokens
+            )
         elif backend == "missing-cli":
             raise SystemExit(
                 "BITNET_BACKEND=bitnet.cpp but llama-cli was not found. "
-                "Set BITNET_HOME / BITNET_CLI or run ./scripts/setup_bitnet.sh"
+                "Set BITNET_HOME / BITNET_CLI or run BITNET_BUILD_CPP=1 ./scripts/setup_bitnet.sh"
             )
         else:
             content, prompt_tokens, completion_tokens = _complete_via_llama_cpp(
@@ -558,7 +600,6 @@ def create_chat_completion_raw(
             SimpleNamespace(message={"role": "assistant", "content": content})
         ],
     )
-
 
 def create_text_completion_raw(
     prompt: str,
@@ -608,37 +649,51 @@ def create_embedding_raw(texts: list[str]) -> SimpleNamespace:
             data.append({"index": idx, "embedding": vector})
         return SimpleNamespace(data=data, model="bitnet-embed")
 
-    # Mean-pool hidden states from the chat model when embedding GGUF is absent.
-    try:
-        llm = get_chat_llm()
-        for idx, text in enumerate(texts):
-            try:
-                emb = llm.create_embedding(text)
-                vector = _normalize(emb["data"][0]["embedding"])
-            except Exception:
-                # Token embedding table mean-pool via embed() if present.
-                tokens = llm.tokenize(text.encode("utf-8"), add_bos=True)
-                if hasattr(llm, "embed"):
-                    vector = _normalize(llm.embed(text))
-                else:
-                    vector = _hash_embedding(text, dims)
-            data.append({"index": idx, "embedding": vector})
-        return SimpleNamespace(data=data, model="bitnet-embed")
-    except Exception as err:
-        logger.warn(
-            f"BitNet embedding unavailable ({err}); using deterministic hash embeddings. "
-            "Set BITNET_EMBED_MODEL_PATH to microsoft/BitNet-embedding-0.6B GGUF for real embeds."
-        )
-        for idx, text in enumerate(texts):
-            data.append({"index": idx, "embedding": _hash_embedding(text, dims)})
-        return SimpleNamespace(data=data, model="bitnet-embed-hash")
+    # Mean-pool from in-process chat model only when llama-cpp can load it.
+    if not requires_bitnet_cpp():
+        try:
+            llm = get_chat_llm()
+            for idx, text in enumerate(texts):
+                try:
+                    emb = llm.create_embedding(text)
+                    vector = _normalize(emb["data"][0]["embedding"])
+                except Exception:
+                    if hasattr(llm, "embed"):
+                        vector = _normalize(llm.embed(text))
+                    else:
+                        vector = _hash_embedding(text, dims)
+                data.append({"index": idx, "embedding": vector})
+            return SimpleNamespace(data=data, model="bitnet-embed")
+        except Exception as err:
+            logger.warn(f"BitNet chat-model embedding unavailable ({err})")
+
+    logger.warn(
+        "BitNet embedding unavailable for i2_s / missing embed GGUF; "
+        "using deterministic hash embeddings. "
+        "Set BITNET_EMBED_MODEL_PATH to a llama.cpp-compatible embed GGUF for real embeds."
+    )
+    for idx, text in enumerate(texts):
+        data.append({"index": idx, "embedding": _hash_embedding(text, dims)})
+    return SimpleNamespace(data=data, model="bitnet-embed-hash")
 
 
 def warm_start() -> Path:
-    """Resolve model (auto-bake if needed), optionally warm-load, return chat path."""
+    """Resolve model (auto-bake if needed), ensure bitnet.cpp for i2_s, return path."""
     path = ensure_chat_model_path()
     _validate_bitnetish(path)
     os.environ["BITNET_MODEL_PATH"] = str(path)
+
+    if requires_bitnet_cpp(path):
+        from autogpt.llm.providers.bitnet_cpp import ensure_bitnet_cli
+
+        cli = ensure_bitnet_cli(gguf=path)
+        logger.typewriter_log(
+            "BitNet: ",
+            Fore.GREEN,
+            f"ready via bitnet.cpp ({cli}) model={path}",
+        )
+        return path
+
     backend = backend_name()
     if backend == "bitnet.cpp":
         cli = find_bitnet_cli()

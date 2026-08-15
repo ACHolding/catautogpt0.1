@@ -43,6 +43,9 @@ models/**/*.safetensors
 !models/**/.gitkeep
 !models/README.md
 
+# microsoft/BitNet checkout + build (cloned by BITNET_AUTO_BUILD)
+third_party/BitNet/
+
 # Editor / OS
 .DS_Store
 .idea/

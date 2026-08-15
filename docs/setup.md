@@ -11,14 +11,15 @@ Choose an environment to run Auto-GPT in (pick one):
 
 ## 🗝️ Getting a BitNet model
 
-This fork runs a **local BitNet LLM**. For real ternary kernels / speed, use
-[microsoft/BitNet](https://github.com/microsoft/BitNet) (`bitnet.cpp`). For a quick
-start, `llama-cpp-python` works with the official GGUF (slower).
+This fork runs a **local BitNet LLM**. Official `ggml-model-i2_s.gguf` **requires**
+[microsoft/BitNet](https://github.com/microsoft/BitNet) (`bitnet.cpp`) — stock
+`llama-cpp-python` cannot load it. `./scripts/setup_bitnet.sh` downloads the GGUF
+and builds bitnet.cpp by default (`BITNET_AUTO_BUILD=True` also builds on first run).
 
 ```shell
 ./scripts/setup_bitnet.sh
-# optional official kernels:
-BITNET_BUILD_CPP=1 ./scripts/setup_bitnet.sh
+# skip the C++ build only if you have a non-i2_s GGUF:
+BITNET_BUILD_CPP=0 ./scripts/setup_bitnet.sh
 ```
 
 Or manually:
@@ -32,7 +33,7 @@ Or manually:
     ```
 
 3. Set `BITNET_MODEL_PATH` in `.env` to the `.gguf` file (prefer `ggml-model-i2_s.gguf`).
-4. Optionally set `BITNET_HOME` to a built `microsoft/BitNet` tree and `BITNET_BACKEND=bitnet.cpp`.
+4. Build bitnet.cpp and set `BITNET_HOME` (or rely on `BITNET_AUTO_BUILD=True`).
 
 
 ## Setting up Auto-GPT

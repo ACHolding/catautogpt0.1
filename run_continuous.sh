@@ -105,7 +105,8 @@ while true; do
 
     # 2 = configuration error (missing BitNet model, etc.) — do not restart-loop.
     if [[ $exit_code -eq 2 ]]; then
-        echo "Configuration error. Fix BITNET_MODEL_PATH in .env, then re-run."
+        echo "Configuration error. Fix BitNet runtime (BITNET_MODEL_PATH / bitnet.cpp), then re-run."
+        echo "  Official i2_s GGUF needs: BITNET_BUILD_CPP=1 ./scripts/setup_bitnet.sh"
         exit 2
     fi
 

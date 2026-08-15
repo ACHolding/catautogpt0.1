@@ -29,9 +29,12 @@ Configuration is controlled through the `Config` object. You can set configurati
 - `IMAGE_PROVIDER`: Image provider. Options are `huggingface` and `sdwebui` (DALL-E removed). Default: huggingface
 - `IMAGE_SIZE`: Default size of image to generate. Default: 256
 - `BITNET_MODEL_PATH`: *REQUIRED* — path to a local BitNet (or compatible) GGUF model.
+- `BITNET_AUTO_DOWNLOAD`: Auto-fetch official GGUF from Hugging Face. Default: True.
+- `BITNET_AUTO_BUILD`: Auto-clone/build microsoft/BitNet when i2_s GGUF needs bitnet.cpp. Default: True.
 - `BITNET_EMBED_MODEL_PATH`: Optional BitNet embedding GGUF (e.g. BitNet-embedding-0.6B).
-- `BITNET_BACKEND`: `auto` (default), `bitnet.cpp`, or `llama-cpp`.
-- `BITNET_HOME` / `BITNET_CLI`: Path to microsoft/BitNet checkout or `llama-cli` binary.
+- `BITNET_BACKEND`: `auto` (default), `bitnet.cpp`, or `llama-cpp`. Official i2_s always uses bitnet.cpp.
+- `BITNET_HOME` / `BITNET_CLI`: Path to microsoft/BitNet checkout or `llama-completion` / `llama-cli` binary.
+  On paths containing `#` or `:` (e.g. this USB volume), defaults to `~/.cache/catautogpt/BitNet`.
 - `BITNET_N_CTX`: Context size. Default: 4096 (BitNet-b1.58-2B-4T native).
 - `BITNET_N_BATCH` / `BITNET_N_UBATCH`: Prefill batch sizes. Default: 512.
 - `BITNET_N_THREADS` / `BITNET_N_THREADS_BATCH`: CPU threads for generate / prefill.

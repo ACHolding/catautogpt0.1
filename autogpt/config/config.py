@@ -425,8 +425,10 @@ def check_bitnet_model(config: Config) -> None:
         print(Fore.RED + f"Failed to load BitNet model: {err}" + Fore.RESET)
         print(
             Fore.YELLOW
-            + "Check BITNET_MODEL_PATH points to a BitNet i2_s GGUF, "
-            + "and that llama-cpp-python is installed."
+            + "Official BitNet i2_s GGUF needs bitnet.cpp (not stock llama.cpp).\n"
+            + "  BITNET_BUILD_CPP=1 ./scripts/setup_bitnet.sh\n"
+            + "  # or BITNET_AUTO_BUILD=True (default) on first run\n"
+            + "  # then set BITNET_HOME=third_party/BitNet if needed"
             + Fore.RESET
         )
         raise SystemExit(2) from err
