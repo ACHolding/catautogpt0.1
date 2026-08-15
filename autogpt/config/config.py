@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional, Union
 import yaml
 from auto_gpt_plugin_template import AutoGPTPluginTemplate
 from colorama import Fore
-from pydantic import Field, validator
+from pydantic import Field, field_validator, model_validator
 
 from autogpt.core.configuration.schema import Configurable, SystemSettings
 from autogpt.llm.providers.openai import OPEN_AI_CHAT_MODELS
@@ -138,24 +138,27 @@ class Config(SystemSettings, arbitrary_types_allowed=True):
     # Stable Diffusion
     sd_webui_auth: Optional[str] = None
 
-    @validator("plugins", each_item=True)
-    def validate_plugins(cls, p: AutoGPTPluginTemplate | Any):
-        assert issubclass(
-            p.__class__, AutoGPTPluginTemplate
-        ), f"{p} does not subclass AutoGPTPluginTemplate"
-        assert (
-            p.__class__.__name__ != "AutoGPTPluginTemplate"
-        ), f"Plugins must subclass AutoGPTPluginTemplate; {p} is a template instance"
-        return p
+    @field_validator("plugins")
+    @classmethod
+    def validate_plugins(cls, plugins: list[Any]):
+        for p in plugins:
+            assert issubclass(
+                p.__class__, AutoGPTPluginTemplate
+            ), f"{p} does not subclass AutoGPTPluginTemplate"
+            assert (
+                p.__class__.__name__ != "AutoGPTPluginTemplate"
+            ), f"Plugins must subclass AutoGPTPluginTemplate; {p} is a template instance"
+        return plugins
 
-    @validator("openai_functions")
-    def validate_openai_functions(cls, v: bool, values: dict[str, Any]):
-        if v:
-            smart_llm = values["smart_llm"]
+    @model_validator(mode="after")
+    def validate_openai_functions(self):
+        if self.openai_functions:
+            smart_llm = self.smart_llm
             assert OPEN_AI_CHAT_MODELS[smart_llm].supports_functions, (
                 f"Model {smart_llm} does not support OpenAI Functions. "
                 "Please disable OPENAI_FUNCTIONS or choose a suitable model."
             )
+        return self
 
     def get_openai_credentials(self, model: str) -> dict[str, str]:
         credentials = {

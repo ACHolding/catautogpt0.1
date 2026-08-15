@@ -98,9 +98,15 @@ def fetch_openai_plugins_manifest_and_spec(config: Config) -> dict:
             logger.info(f"Manifest for {url} already exists")
             manifest = json.load(open(f"{openai_plugin_client_dir}/ai-plugin.json"))
         if not os.path.exists(f"{openai_plugin_client_dir}/openapi.json"):
-            openapi_spec = openapi_python_client._get_document(
-                url=manifest["api"]["url"], path=None, timeout=5
-            )
+            try:
+                openapi_spec = openapi_python_client._get_document(
+                    source=manifest["api"]["url"], timeout=5
+                )
+            except TypeError:
+                # openapi-python-client < 0.15
+                openapi_spec = openapi_python_client._get_document(
+                    url=manifest["api"]["url"], path=None, timeout=5
+                )
             write_dict_to_json_file(
                 openapi_spec, f"{openai_plugin_client_dir}/openapi.json"
             )
@@ -148,41 +154,55 @@ def initialize_openai_plugins(
     if create_directory_if_not_exists(openai_plugins_dir):
         for url, manifest_spec in manifests_specs.items():
             openai_plugin_client_dir = f"{openai_plugins_dir}/{urlparse(url).hostname}"
-            _meta_option = (openapi_python_client.MetaType.SETUP,)
-            _config = OpenAPIConfig(
-                **{
-                    "project_name_override": "client",
-                    "package_name_override": "client",
-                }
-            )
             prev_cwd = Path.cwd()
             os.chdir(openai_plugin_client_dir)
 
-            if not os.path.exists("client"):
-                client_results = openapi_python_client.create_new_client(
-                    url=manifest_spec["manifest"]["api"]["url"],
-                    path=None,
-                    meta=_meta_option,
-                    config=_config,
-                )
-                if client_results:
-                    logger.warn(
-                        f"Error creating OpenAPI client: {client_results[0].header} \n"
-                        f" details: {client_results[0].detail}"
-                    )
-                    continue
-            spec = importlib.util.spec_from_file_location(
-                "client", "client/client/client.py"
-            )
-            module = importlib.util.module_from_spec(spec)
-
             try:
+                if not os.path.exists("client"):
+                    if not hasattr(openapi_python_client, "create_new_client"):
+                        logger.warn(
+                            "Installed openapi-python-client no longer provides "
+                            "create_new_client(); skipping OpenAI plugin client "
+                            f"generation for {url}."
+                        )
+                        continue
+                    try:
+                        _config = OpenAPIConfig(
+                            project_name_override="client",
+                            package_name_override="client",
+                        )
+                        _meta_option = (openapi_python_client.MetaType.SETUP,)
+                        client_results = openapi_python_client.create_new_client(
+                            url=manifest_spec["manifest"]["api"]["url"],
+                            path=None,
+                            meta=_meta_option,
+                            config=_config,
+                        )
+                    except TypeError as err:
+                        logger.warn(
+                            f"Incompatible openapi-python-client Config API ({err}); "
+                            f"skipping OpenAI plugin client for {url}."
+                        )
+                        continue
+                    if client_results:
+                        logger.warn(
+                            f"Error creating OpenAPI client: {client_results[0].header} \n"
+                            f" details: {client_results[0].detail}"
+                        )
+                        continue
+                client_path = Path("client/client/client.py")
+                if not client_path.exists():
+                    logger.warn(f"OpenAPI client module missing for {url}; skipping.")
+                    continue
+                spec = importlib.util.spec_from_file_location(
+                    "client", str(client_path)
+                )
+                module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
+                client = module.Client(base_url=url)
+                manifest_spec["client"] = client
             finally:
                 os.chdir(prev_cwd)
-
-            client = module.Client(base_url=url)
-            manifest_spec["client"] = client
     return manifests_specs
 
 
