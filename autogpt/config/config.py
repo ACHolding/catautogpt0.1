@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
@@ -381,34 +382,94 @@ class ConfigBuilder(Configurable[Config]):
         }
 
 
+def _looks_like_placeholder_api_key(key: str) -> bool:
+    lowered = key.strip().lower()
+    placeholders = {
+        "",
+        "your-openai-api-key",
+        "sk-dummy",
+        "sk-xxx",
+        "none",
+        "null",
+        "changeme",
+    }
+    if lowered in placeholders:
+        return True
+    if "your-openai" in lowered or "api-key-here" in lowered or "replace-me" in lowered:
+        return True
+    return False
+
+
+def _is_plausible_openai_api_key(key: str) -> bool:
+    key = key.strip()
+    if _looks_like_placeholder_api_key(key):
+        return False
+    # Current OpenAI user keys: sk-... / sk-proj-... ; Azure keys vary.
+    if key.startswith("sk-") and len(key) >= 20:
+        return True
+    return len(key) >= 20
+
+
 def check_openai_api_key(config: Config) -> None:
-    """Check if the OpenAI API key is set in config.py or as an environment variable."""
-    if not config.openai_api_key:
+    """Check if the OpenAI API key is set and looks usable."""
+    key = (config.openai_api_key or "").strip()
+
+    if key and _is_plausible_openai_api_key(key):
+        return
+
+    if key and _looks_like_placeholder_api_key(key):
+        print(
+            Fore.RED
+            + "OPENAI_API_KEY is still a placeholder (e.g. your-openai-api-key)."
+            + Fore.RESET
+        )
+    elif key:
+        print(Fore.RED + "OPENAI_API_KEY does not look valid." + Fore.RESET)
+    else:
         print(
             Fore.RED
             + "Please set your OpenAI API key in .env or as an environment variable."
             + Fore.RESET
         )
-        print("You can get your key from https://platform.openai.com/account/api-keys")
-        openai_api_key = input(
-            "If you do have the key, please enter your OpenAI API key now:\n"
+
+    print("You can get your key from https://platform.openai.com/account/api-keys")
+    print(
+        Fore.YELLOW
+        + f"Hint: copy {_PROJECT_ENV_HINT} to .env and set OPENAI_API_KEY=sk-..."
+        + Fore.RESET
+    )
+
+    # Non-interactive / continuous mode: fail fast with a stable exit code.
+    if not sys.stdin.isatty() or config.continuous_mode or config.skip_reprompt:
+        print(
+            Fore.RED
+            + "Refusing to start without a valid OPENAI_API_KEY "
+            "(exit code 2 = configuration/auth error)."
+            + Fore.RESET
         )
-        key_pattern = r"^sk-\w{48}"
-        openai_api_key = openai_api_key.strip()
-        if re.search(key_pattern, openai_api_key):
-            os.environ["OPENAI_API_KEY"] = openai_api_key
-            config.openai_api_key = openai_api_key
-            print(
-                Fore.GREEN
-                + "OpenAI API key successfully set!\n"
-                + Fore.YELLOW
-                + "NOTE: The API key you've set is only temporary.\n"
-                + "For longer sessions, please set it in .env file"
-                + Fore.RESET
-            )
-        else:
-            print("Invalid OpenAI API key!")
-            exit(1)
+        raise SystemExit(2)
+
+    openai_api_key = input(
+        "If you do have the key, please enter your OpenAI API key now:\n"
+    ).strip()
+    if _is_plausible_openai_api_key(openai_api_key):
+        os.environ["OPENAI_API_KEY"] = openai_api_key
+        config.openai_api_key = openai_api_key
+        print(
+            Fore.GREEN
+            + "OpenAI API key successfully set!\n"
+            + Fore.YELLOW
+            + "NOTE: The API key you've set is only temporary.\n"
+            + "For longer sessions, please set it in .env file"
+            + Fore.RESET
+        )
+    else:
+        print("Invalid OpenAI API key!")
+        raise SystemExit(2)
+
+
+# Used in the hint above; resolved relative to the project root.
+_PROJECT_ENV_HINT = ".env.template"
 
 
 def _safe_split(s: Union[str, None], sep: str = ",") -> list[str]:

@@ -2,6 +2,9 @@
 # Keep Auto-GPT running in continuous mode.
 # Restarts automatically if the process exits (crash, limit, etc.).
 # Stop with Ctrl+C.
+#
+# Exit code 2 = configuration/auth error (e.g. missing OPENAI_API_KEY):
+# the supervisor will NOT restart in that case.
 
 set -uo pipefail
 
@@ -24,6 +27,14 @@ PYTHON_CMD="$(find_python_command)"
 if ! "$PYTHON_CMD" -c "import sys; sys.exit(0 if sys.version_info >= (3, 14) else 1)"; then
     echo "Python 3.14 or higher is required to run Auto GPT." >&2
     exit 1
+fi
+
+if [[ ! -f "$SCRIPT_DIR/.env" ]]; then
+    echo "Missing $SCRIPT_DIR/.env"
+    echo "Create one from the template and set OPENAI_API_KEY:"
+    echo "  cp .env.template .env"
+    echo "  # then edit .env and set OPENAI_API_KEY=sk-..."
+    exit 2
 fi
 
 # Lightweight deps check (same as run.sh, but non-fatal).
@@ -71,6 +82,12 @@ while true; do
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Auto-GPT exited cleanly (code 0)."
     else
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Auto-GPT exited with code ${exit_code}."
+    fi
+
+    # 2 = configuration/auth error — do not hammer the API in a restart loop.
+    if [[ $exit_code -eq 2 ]]; then
+        echo "Configuration/auth error. Fix OPENAI_API_KEY in .env, then re-run."
+        exit 2
     fi
 
     echo "Restarting in ${RESTART_DELAY}s... (Ctrl+C to quit)"
