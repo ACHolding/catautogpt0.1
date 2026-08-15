@@ -382,40 +382,35 @@ class ConfigBuilder(Configurable[Config]):
 
 
 def check_bitnet_model(config: Config) -> None:
-    """Ensure a local BitNet GGUF model is available."""
-    from autogpt.llm.providers.openai import _resolve_model_path, get_bitnet_llm
+    """Ensure a local BitNet GGUF model is available and warm-start the engine."""
+    from autogpt.llm.providers import bitnet_engine
 
-    # Prefer explicit config / env path.
     if config.bitnet_model_path:
         os.environ.setdefault("BITNET_MODEL_PATH", config.bitnet_model_path)
 
     try:
-        path = _resolve_model_path()
+        path = bitnet_engine.warm_start()
     except FileNotFoundError as err:
         print(Fore.RED + str(err) + Fore.RESET)
         print(
             Fore.YELLOW
-            + "Download example:\n"
+            + "Download / setup:\n"
+            + "  ./scripts/setup_bitnet.sh\n"
+            + "  # or manually:\n"
             + "  huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf "
             + "--local-dir models/BitNet-b1.58-2B-4T\n"
-            + "  echo BITNET_MODEL_PATH=models/BitNet-b1.58-2B-4T/*.gguf >> .env"
+            + "  echo BITNET_MODEL_PATH=models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf >> .env"
             + Fore.RESET
         )
         raise SystemExit(2) from err
-
-    config.bitnet_model_path = str(path)
-    os.environ["BITNET_MODEL_PATH"] = str(path)
-
-    # Warm-load so failures surface at startup, not mid-run.
-    try:
-        get_bitnet_llm()
     except SystemExit:
         raise
     except Exception as err:
         print(Fore.RED + f"Failed to load BitNet model: {err}" + Fore.RESET)
         raise SystemExit(2) from err
 
-    print(Fore.GREEN + f"BitNet model ready: {path}" + Fore.RESET)
+    config.bitnet_model_path = str(path)
+    os.environ["BITNET_MODEL_PATH"] = str(path)
 
 
 # Backwards-compatible name used by older call sites / tests.

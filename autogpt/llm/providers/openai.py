@@ -1,4 +1,4 @@
-"""Local BitNet LLM provider (via llama-cpp-python + BitNet GGUF).
+"""Local BitNet LLM provider (BitNet engine + compatibility aliases).
 
 Replaces the former OpenAI API provider. Model names like ``gpt-3.5-turbo`` /
 ``gpt-4`` are kept as aliases so the rest of Auto-GPT keeps working unchanged.
@@ -6,15 +6,8 @@ Replaces the former OpenAI API provider. Model names like ``gpt-3.5-turbo`` /
 
 from __future__ import annotations
 
-import hashlib
-import os
 from dataclasses import dataclass
-from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Callable, List, Optional
-
-import numpy as np
-from colorama import Fore
 
 from autogpt.llm.base import (
     ChatModelInfo,
@@ -23,7 +16,7 @@ from autogpt.llm.base import (
     TextModelInfo,
     TText,
 )
-from autogpt.logs import logger
+from autogpt.llm.providers import bitnet_engine
 from autogpt.models.command_registry import CommandRegistry
 
 # Canonical BitNet chat model + compatibility aliases for old config values.
@@ -31,7 +24,7 @@ _BITNET_CHAT = ChatModelInfo(
     name="bitnet-b1.58",
     prompt_token_cost=0.0,
     completion_token_cost=0.0,
-    max_tokens=4096,
+    max_tokens=bitnet_engine.DEFAULT_N_CTX,
     supports_functions=False,
 )
 
@@ -70,13 +63,13 @@ OPEN_AI_TEXT_MODELS = {
         name="bitnet-b1.58-text",
         prompt_token_cost=0.0,
         completion_token_cost=0.0,
-        max_tokens=4096,
+        max_tokens=bitnet_engine.DEFAULT_N_CTX,
     ),
     "text-davinci-003": TextModelInfo(
         name="text-davinci-003",
         prompt_token_cost=0.0,
         completion_token_cost=0.0,
-        max_tokens=4096,
+        max_tokens=bitnet_engine.DEFAULT_N_CTX,
     ),
 }
 
@@ -85,13 +78,13 @@ OPEN_AI_EMBEDDING_MODELS = {
         name="bitnet-embed",
         prompt_token_cost=0.0,
         max_tokens=8191,
-        embedding_dimensions=384,
+        embedding_dimensions=bitnet_engine.DEFAULT_EMBED_DIM,
     ),
     "text-embedding-ada-002": EmbeddingModelInfo(
         name="text-embedding-ada-002",
         prompt_token_cost=0.0,
         max_tokens=8191,
-        embedding_dimensions=384,
+        embedding_dimensions=bitnet_engine.DEFAULT_EMBED_DIM,
     ),
 }
 
@@ -101,71 +94,10 @@ OPEN_AI_MODELS: dict[str, ChatModelInfo | EmbeddingModelInfo | TextModelInfo] = 
     **OPEN_AI_EMBEDDING_MODELS,
 }
 
-_llm: Any = None
-_llm_path: str | None = None
-_EMBED_DIM = 384
 
-
-def _resolve_model_path() -> Path:
-    candidates = [
-        os.getenv("BITNET_MODEL_PATH"),
-        os.getenv("LLM_MODEL_PATH"),
-    ]
-    for raw in candidates:
-        if not raw:
-            continue
-        path = Path(raw).expanduser()
-        if path.is_file():
-            return path
-
-    # Common local layout relative to project root.
-    project = Path(__file__).resolve().parents[3]
-    for pattern in (
-        "models/**/*.gguf",
-        "models/*.gguf",
-        "*.gguf",
-    ):
-        matches = sorted(project.glob(pattern))
-        if matches:
-            return matches[0]
-
-    raise FileNotFoundError(
-        "No BitNet GGUF model found. Set BITNET_MODEL_PATH to a .gguf file "
-        "(e.g. microsoft/BitNet-b1.58-2B-4T-gguf via huggingface-cli)."
-    )
-
-
-def get_bitnet_llm(force_reload: bool = False) -> Any:
-    """Lazy-load a BitNet (or compatible) GGUF model through llama-cpp-python."""
-    global _llm, _llm_path
-    model_path = str(_resolve_model_path())
-    if _llm is not None and _llm_path == model_path and not force_reload:
-        return _llm
-
-    try:
-        from llama_cpp import Llama
-    except ImportError as err:
-        raise SystemExit(
-            "llama-cpp-python is required for BitNet inference. "
-            "Install with: pip install llama-cpp-python"
-        ) from err
-
-    n_ctx = int(os.getenv("BITNET_N_CTX", "4096"))
-    n_threads = int(os.getenv("BITNET_N_THREADS", str(os.cpu_count() or 4)))
-    logger.typewriter_log(
-        "BitNet: ",
-        Fore.GREEN,
-        f"loading {model_path} (n_ctx={n_ctx}, threads={n_threads})",
-    )
-    _llm = Llama(
-        model_path=model_path,
-        n_ctx=n_ctx,
-        n_threads=n_threads,
-        embedding=True,
-        verbose=os.getenv("BITNET_VERBOSE", "False") == "True",
-    )
-    _llm_path = model_path
-    return _llm
+# Back-compat exports used by config / older imports.
+_resolve_model_path = bitnet_engine.resolve_chat_model_path
+get_bitnet_llm = bitnet_engine.get_chat_llm
 
 
 def meter_api(func: Callable):
@@ -183,6 +115,10 @@ def retry_api(
     def _wrapper(func: Callable):
         def _wrapped(*args, **kwargs):
             import time
+
+            from colorama import Fore
+
+            from autogpt.logs import logger
 
             attempt = 0
             while True:
@@ -204,10 +140,6 @@ def retry_api(
     return _wrapper
 
 
-def _chat_messages_to_prompt(messages: List[MessageDict]) -> list[dict[str, str]]:
-    return [{"role": m["role"], "content": m.get("content") or ""} for m in messages]
-
-
 @meter_api
 @retry_api()
 def create_chat_completion(
@@ -215,38 +147,26 @@ def create_chat_completion(
     *_,
     **kwargs,
 ) -> Any:
-    """Create a chat completion using the local BitNet model."""
-    llm = get_bitnet_llm()
+    """Create a chat completion using the local BitNet engine."""
     temperature = float(kwargs.get("temperature", 0.0) or 0.0)
-    max_tokens = int(kwargs.get("max_tokens") or 512)
+    max_tokens = int(kwargs.get("max_tokens") or bitnet_engine.DEFAULT_MAX_TOKENS)
     model_name = kwargs.get("model") or "bitnet-b1.58"
 
-    result = llm.create_chat_completion(
-        messages=_chat_messages_to_prompt(messages),
+    response = bitnet_engine.create_chat_completion_raw(
+        messages,
         temperature=temperature,
         max_tokens=max_tokens,
     )
-    content = result["choices"][0]["message"].get("content") or ""
-    usage = result.get("usage") or {}
-    prompt_tokens = int(usage.get("prompt_tokens") or 0)
-    completion_tokens = int(usage.get("completion_tokens") or 0)
+    response.model = model_name
 
     from autogpt.llm.api_manager import ApiManager
 
-    ApiManager().update_cost(prompt_tokens, completion_tokens, model_name)
-
-    return SimpleNamespace(
-        model=model_name,
-        usage=SimpleNamespace(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-        ),
-        choices=[
-            SimpleNamespace(
-                message={"role": "assistant", "content": content},
-            )
-        ],
+    ApiManager().update_cost(
+        response.usage.prompt_tokens,
+        response.usage.completion_tokens,
+        model_name,
     )
+    return response
 
 
 @meter_api
@@ -256,44 +176,44 @@ def create_text_completion(
     *_,
     **kwargs,
 ) -> Any:
-    """Create a text completion using the local BitNet model."""
-    llm = get_bitnet_llm()
+    """Create a text completion using the local BitNet engine."""
     temperature = float(kwargs.get("temperature", 0.0) or 0.0)
-    max_tokens = int(kwargs.get("max_tokens") or 512)
+    max_tokens = int(kwargs.get("max_tokens") or bitnet_engine.DEFAULT_MAX_TOKENS)
     model_name = kwargs.get("model") or "bitnet-b1.58-text"
 
-    result = llm(
+    response = bitnet_engine.create_text_completion_raw(
         prompt,
         temperature=temperature,
         max_tokens=max_tokens,
-        echo=False,
     )
-    text = result["choices"][0]["text"]
-    usage = result.get("usage") or {}
-    prompt_tokens = int(usage.get("prompt_tokens") or 0)
-    completion_tokens = int(usage.get("completion_tokens") or 0)
+    response.model = model_name
 
     from autogpt.llm.api_manager import ApiManager
 
-    ApiManager().update_cost(prompt_tokens, completion_tokens, model_name)
-
-    return SimpleNamespace(
-        model=model_name,
-        usage=SimpleNamespace(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-        ),
-        choices=[SimpleNamespace(text=text)],
+    ApiManager().update_cost(
+        response.usage.prompt_tokens,
+        response.usage.completion_tokens,
+        model_name,
     )
+    return response
 
 
-def _hash_embedding(text: str, dims: int = _EMBED_DIM) -> list[float]:
-    """Deterministic local embedding fallback when the GGUF has no embed head."""
-    digest = hashlib.sha256(text.encode("utf-8")).digest()
-    rng = np.random.default_rng(int.from_bytes(digest[:8], "little"))
-    vec = rng.standard_normal(dims).astype(np.float32)
-    vec /= np.linalg.norm(vec) + 1e-9
-    return vec.tolist()
+def _coerce_embedding_texts(
+    input: str | TText | List[str] | List[TText],
+) -> list[str]:
+    if isinstance(input, str):
+        return [input]
+    if isinstance(input, list) and input and isinstance(input[0], int):
+        return [" ".join(str(t) for t in input)]
+    if isinstance(input, list):
+        texts: list[str] = []
+        for item in input:
+            if isinstance(item, str):
+                texts.append(item)
+            else:
+                texts.append(" ".join(str(t) for t in item))
+        return texts
+    return [str(input)]
 
 
 @meter_api
@@ -303,41 +223,16 @@ def create_embedding(
     *_,
     **kwargs,
 ) -> Any:
-    """Create embeddings via BitNet/llama.cpp, with a local hash fallback."""
-    texts: list[str]
-    if isinstance(input, str):
-        texts = [input]
-    elif isinstance(input, list) and input and isinstance(input[0], int):
-        texts = [" ".join(str(t) for t in input)]
-    elif isinstance(input, list):
-        texts = []
-        for item in input:
-            if isinstance(item, str):
-                texts.append(item)
-            else:
-                texts.append(" ".join(str(t) for t in item))
-    else:
-        texts = [str(input)]
-
+    """Create embeddings via BitNet embedding GGUF / chat fallback / hash."""
+    texts = _coerce_embedding_texts(input)
     model_name = kwargs.get("model") or "bitnet-embed"
-    data = []
-    try:
-        llm = get_bitnet_llm()
-        for idx, text in enumerate(texts):
-            emb = llm.create_embedding(text)
-            vector = emb["data"][0]["embedding"]
-            data.append({"index": idx, "embedding": vector})
-    except Exception as err:
-        logger.warn(
-            f"BitNet embedding unavailable ({err}); using local hash embeddings."
-        )
-        for idx, text in enumerate(texts):
-            data.append({"index": idx, "embedding": _hash_embedding(text)})
+    response = bitnet_engine.create_embedding_raw(texts)
+    response.model = model_name
 
     from autogpt.llm.api_manager import ApiManager
 
     ApiManager().update_cost(sum(len(t.split()) for t in texts), 0, model_name)
-    return SimpleNamespace(data=data, model=model_name)
+    return response
 
 
 @dataclass

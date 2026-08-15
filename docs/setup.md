@@ -11,17 +11,28 @@ Choose an environment to run Auto-GPT in (pick one):
 
 ## 🗝️ Getting a BitNet model
 
-This fork runs a **local BitNet LLM** via `llama-cpp-python` (no OpenAI API key).
+This fork runs a **local BitNet LLM**. For real ternary kernels / speed, use
+[microsoft/BitNet](https://github.com/microsoft/BitNet) (`bitnet.cpp`). For a quick
+start, `llama-cpp-python` works with the official GGUF (slower).
+
+```shell
+./scripts/setup_bitnet.sh
+# optional official kernels:
+BITNET_BUILD_CPP=1 ./scripts/setup_bitnet.sh
+```
+
+Or manually:
 
 1. Install [huggingface-cli](https://huggingface.co/docs/huggingface_hub/guides/cli) if needed.
-2. Download a BitNet GGUF, for example:
+2. Download a BitNet GGUF:
 
     ```shell
     huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf \
       --local-dir models/BitNet-b1.58-2B-4T
     ```
 
-3. Set `BITNET_MODEL_PATH` in `.env` to the `.gguf` file path.
+3. Set `BITNET_MODEL_PATH` in `.env` to the `.gguf` file (prefer `ggml-model-i2_s.gguf`).
+4. Optionally set `BITNET_HOME` to a built `microsoft/BitNet` tree and `BITNET_BACKEND=bitnet.cpp`.
 
 
 ## Setting up Auto-GPT
