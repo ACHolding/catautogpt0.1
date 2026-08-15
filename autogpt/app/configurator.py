@@ -9,7 +9,6 @@ from colorama import Back, Fore, Style
 from autogpt import utils
 from autogpt.config import Config
 from autogpt.config.config import GPT_3_MODEL, GPT_4_MODEL
-from autogpt.llm.api_manager import ApiManager
 from autogpt.logs import logger
 from autogpt.memory.vector import get_supported_memory_backends
 
@@ -170,18 +169,15 @@ def check_model(
     model_type: Literal["smart_llm", "fast_llm"],
     config: Config,
 ) -> str:
-    """Check if model is available for use. If not, return gpt-3.5-turbo."""
-    openai_credentials = config.get_openai_credentials(model_name)
-    api_manager = ApiManager()
-    models = api_manager.get_models(**openai_credentials)
+    """Check if model is available for use. If not, return bitnet-b1.58."""
+    from autogpt.llm.providers.openai import OPEN_AI_CHAT_MODELS
 
-    if any(model_name in m["id"] for m in models):
+    if model_name in OPEN_AI_CHAT_MODELS:
         return model_name
 
     logger.typewriter_log(
         "WARNING: ",
         Fore.YELLOW,
-        f"You do not have access to {model_name}. Setting {model_type} to "
-        f"gpt-3.5-turbo.",
+        f"Unknown model {model_name}. Setting {model_type} to bitnet-b1.58.",
     )
-    return "gpt-3.5-turbo"
+    return "bitnet-b1.58"

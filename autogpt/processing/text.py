@@ -3,8 +3,8 @@ from math import ceil
 from typing import Optional
 
 import spacy
-import tiktoken
 
+from autogpt.compat import tiktoken_lib
 from autogpt.config import Config
 from autogpt.llm.base import ChatSequence
 from autogpt.llm.providers.openai import OPEN_AI_MODELS
@@ -52,7 +52,7 @@ def chunk_content(
 
     max_chunk_length = max_chunk_length or _max_chunk_length(for_model)
 
-    tokenizer = tiktoken.encoding_for_model(for_model)
+    tokenizer = tiktoken_lib.encoding_for_model(for_model)
 
     tokenized_text = tokenizer.encode(content)
     total_length = len(tokenized_text)

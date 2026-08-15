@@ -3,10 +3,13 @@ from __future__ import annotations
 
 from typing import List, overload
 
-import tiktoken
-
+from autogpt.compat import tiktoken_lib
 from autogpt.llm.base import Message
 from autogpt.logs import logger
+
+
+def _is_bitnet_model(model: str) -> bool:
+    return model.startswith("bitnet")
 
 
 @overload
@@ -24,20 +27,23 @@ def count_message_tokens(
 ) -> int:
     """
     Returns the number of tokens used by a list of messages.
-
-    Args:
-        messages (list): A list of messages, each of which is a dictionary
-            containing the role and content of the message.
-        model (str): The name of the model to use for tokenization.
-            Defaults to "gpt-3.5-turbo-0301".
-
-    Returns:
-        int: The number of tokens used by the list of messages.
     """
     if isinstance(messages, Message):
         messages = [messages]
 
-    if model.startswith("gpt-3.5-turbo"):
+    if _is_bitnet_model(model):
+        try:
+            from autogpt.llm.providers import bitnet_engine
+
+            payload = [
+                {"role": m.role, "content": m.content or ""} for m in messages
+            ]
+            return bitnet_engine.count_chat_tokens(payload)
+        except Exception:
+            # Fall through to tiktoken estimate if the GGUF is not loaded yet.
+            pass
+
+    if model.startswith("gpt-3.5-turbo") or model.startswith("bitnet"):
         tokens_per_message = (
             4  # every message follows <|start|>{role/name}\n{content}<|end|>\n
         )
@@ -54,10 +60,10 @@ def count_message_tokens(
             " information on how messages are converted to tokens."
         )
     try:
-        encoding = tiktoken.encoding_for_model(encoding_model)
+        encoding = tiktoken_lib.encoding_for_model(encoding_model)
     except KeyError:
         logger.warn("Warning: model not found. Using cl100k_base encoding.")
-        encoding = tiktoken.get_encoding("cl100k_base")
+        encoding = tiktoken_lib.get_encoding("cl100k_base")
 
     num_tokens = 0
     for message in messages:
@@ -73,13 +79,19 @@ def count_message_tokens(
 def count_string_tokens(string: str, model_name: str) -> int:
     """
     Returns the number of tokens in a text string.
-
-    Args:
-        string (str): The text string.
-        model_name (str): The name of the encoding to use. (e.g., "gpt-3.5-turbo")
-
-    Returns:
-        int: The number of tokens in the text string.
     """
-    encoding = tiktoken.encoding_for_model(model_name)
+    if _is_bitnet_model(model_name):
+        if string == "":
+            return 0
+        try:
+            from autogpt.llm.providers import bitnet_engine
+
+            return bitnet_engine.tokenize_count(string)
+        except Exception:
+            return max(1, len(string) // 4)
+
+    try:
+        encoding = tiktoken_lib.encoding_for_model(model_name)
+    except KeyError:
+        encoding = tiktoken_lib.get_encoding("cl100k_base")
     return len(encoding.encode(string))

@@ -96,13 +96,13 @@ class SimplePlanner(Configurable):
 
         self._prompt_strategies = {
             "name_and_goals": strategies.NameAndGoals(
-                **self._configuration.prompt_strategies.name_and_goals.dict()
+                **self._configuration.prompt_strategies.name_and_goals.model_dump()
             ),
             "initial_plan": strategies.InitialPlan(
-                **self._configuration.prompt_strategies.initial_plan.dict()
+                **self._configuration.prompt_strategies.initial_plan.model_dump()
             ),
             "next_ability": strategies.NextAbility(
-                **self._configuration.prompt_strategies.next_ability.dict()
+                **self._configuration.prompt_strategies.next_ability.model_dump()
             ),
         }
 
@@ -144,7 +144,7 @@ class SimplePlanner(Configurable):
         **kwargs,
     ) -> LanguageModelResponse:
         model_classification = prompt_strategy.model_classification
-        model_configuration = self._configuration.models[model_classification].dict()
+        model_configuration = self._configuration.models[model_classification].model_dump()
         self._logger.debug(f"Using model configuration: {model_configuration}")
         del model_configuration["provider_name"]
         provider = self._providers[model_classification]
@@ -160,7 +160,7 @@ class SimplePlanner(Configurable):
             **model_configuration,
             completion_parser=prompt_strategy.parse_response_content,
         )
-        return LanguageModelResponse.parse_obj(response.dict())
+        return LanguageModelResponse.model_validate(response.model_dump())
 
     def _make_template_kwargs_for_strategy(self, strategy: PromptStrategy):
         provider = self._providers[strategy.model_classification]

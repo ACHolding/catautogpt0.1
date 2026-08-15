@@ -110,14 +110,14 @@ def run_auto_gpt(
                 f"You are running on `{git_branch}` branch "
                 "- this is not a supported branch.",
             )
-        if sys.version_info < (3, 10):
+        if sys.version_info < (3, 14):
             logger.typewriter_log(
                 "WARNING: ",
                 Fore.RED,
                 "You are running on an older version of Python. "
                 "Some people have observed problems with certain "
                 "parts of Auto-GPT with this version. "
-                "Please consider upgrading to Python 3.10 or higher.",
+                "Please consider upgrading to Python 3.14 or higher.",
             )
 
     if install_plugin_deps:

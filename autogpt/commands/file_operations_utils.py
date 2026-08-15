@@ -4,10 +4,14 @@ import os
 import charset_normalizer
 import docx
 import markdown
-import PyPDF2
 import yaml
 from bs4 import BeautifulSoup
 from pylatexenc.latex2text import LatexNodes2Text
+
+try:
+    from pypdf import PdfReader
+except ImportError:  # pragma: no cover - legacy dependency name
+    from PyPDF2 import PdfReader
 
 from autogpt import logs
 from autogpt.logs import logger
@@ -29,7 +33,7 @@ class TXTParser(ParserStrategy):
 # Reading text from binary file using pdf parser
 class PDFParser(ParserStrategy):
     def read(self, file_path: str) -> str:
-        parser = PyPDF2.PdfReader(file_path)
+        parser = PdfReader(file_path)
         text = ""
         for page_idx in range(len(parser.pages)):
             text += parser.pages[page_idx].extract_text()
@@ -84,7 +88,7 @@ class MarkdownParser(ParserStrategy):
     def read(self, file_path: str) -> str:
         with open(file_path, "r") as f:
             html = markdown.markdown(f.read())
-            text = "".join(BeautifulSoup(html, "html.parser").findAll(string=True))
+            text = "".join(BeautifulSoup(html, "html.parser").find_all(string=True))
         return text
 
 

@@ -14,10 +14,10 @@ Configuration is controlled through the `Config` object. You can set configurati
 - `DISABLED_COMMAND_CATEGORIES`: Command categories to disable. Command categories are Python module names, e.g. autogpt.commands.execute_code. See the directory `autogpt/commands` in the source for all command modules. Default: None
 - `ELEVENLABS_API_KEY`: ElevenLabs API Key. Optional.
 - `ELEVENLABS_VOICE_ID`: ElevenLabs Voice ID. Optional.
-- `EMBEDDING_MODEL`: LLM Model to use for embedding tasks. Default: text-embedding-ada-002
+- `EMBEDDING_MODEL`: LLM Model to use for embedding tasks. Default: bitnet-embed
 - `EXECUTE_LOCAL_COMMANDS`: If shell commands should be executed locally. Default: False
 - `EXIT_KEY`: Exit key accepted to exit. Default: n
-- `FAST_LLM`: LLM Model to use for most tasks. Default: gpt-3.5-turbo
+- `FAST_LLM`: LLM Model to use for most tasks. Default: bitnet-b1.58
 - `GITHUB_API_KEY`: [Github API Key](https://github.com/settings/tokens). Optional.
 - `GITHUB_USERNAME`: GitHub Username. Optional.
 - `GOOGLE_API_KEY`: Google API key. Optional.
@@ -26,12 +26,23 @@ Configuration is controlled through the `Config` object. You can set configurati
 - `HUGGINGFACE_API_TOKEN`: HuggingFace API, to be used for both image generation and audio to text. Optional.
 - `HUGGINGFACE_AUDIO_TO_TEXT_MODEL`: HuggingFace audio to text model. Default: CompVis/stable-diffusion-v1-4
 - `HUGGINGFACE_IMAGE_MODEL`: HuggingFace model to use for image generation. Default: CompVis/stable-diffusion-v1-4
-- `IMAGE_PROVIDER`: Image provider. Options are `dalle`, `huggingface`, and `sdwebui`. Default: dalle
+- `IMAGE_PROVIDER`: Image provider. Options are `huggingface` and `sdwebui` (DALL-E removed). Default: huggingface
 - `IMAGE_SIZE`: Default size of image to generate. Default: 256
+- `BITNET_MODEL_PATH`: *REQUIRED* — path to a local BitNet (or compatible) GGUF model.
+- `BITNET_AUTO_DOWNLOAD`: Auto-fetch official GGUF from Hugging Face. Default: True.
+- `BITNET_AUTO_BUILD`: Auto-clone/build microsoft/BitNet when i2_s GGUF needs bitnet.cpp. Default: True.
+- `BITNET_EMBED_MODEL_PATH`: Optional BitNet embedding GGUF (e.g. BitNet-embedding-0.6B).
+- `BITNET_BACKEND`: `auto` (default), `bitnet.cpp`, or `llama-cpp`. Official i2_s always uses bitnet.cpp.
+- `BITNET_HOME` / `BITNET_CLI`: Path to microsoft/BitNet checkout or `llama-completion` / `llama-cli` binary.
+  On paths containing `#` or `:` (e.g. this USB volume), defaults to `~/.cache/catautogpt/BitNet`.
+- `BITNET_N_CTX`: Context size. Default: 4096 (BitNet-b1.58-2B-4T native).
+- `BITNET_N_BATCH` / `BITNET_N_UBATCH`: Prefill batch sizes. Default: 512.
+- `BITNET_N_THREADS` / `BITNET_N_THREADS_BATCH`: CPU threads for generate / prefill.
+- `BITNET_N_GPU_LAYERS`: GPU offload layers (0 = CPU; use with BitNet GPU builds).
+- `BITNET_CHAT_FORMAT`: Chat template name for llama-cpp-python. Default: llama-3.
+- `BITNET_EMBED_DIMS`: Embedding vector size for hash fallback / metadata. Default: 1024
 - `MEMORY_BACKEND`: Memory back-end to use. Currently `json_file` is the only supported and enabled backend. Default: json_file
 - `MEMORY_INDEX`: Value used in the Memory backend for scoping, naming, or indexing. Default: auto-gpt
-- `OPENAI_API_KEY`: *REQUIRED*- Your [OpenAI API Key](https://platform.openai.com/account/api-keys).
-- `OPENAI_ORGANIZATION`: Organization ID in OpenAI. Optional.
 - `PLAIN_OUTPUT`: Plain output, which disables the spinner. Default: False
 - `PLUGINS_CONFIG_FILE`: Path of the Plugins Config file relative to the Auto-GPT root directory. Default: plugins_config.yaml
 - `PROMPT_SETTINGS_FILE`: Location of the Prompt Settings file relative to the Auto-GPT root directory. Default: prompt_settings.yaml
@@ -44,9 +55,9 @@ Configuration is controlled through the `Config` object. You can set configurati
 - `SHELL_ALLOWLIST`: List of shell commands that ARE allowed to be executed by Auto-GPT. Only applies if `SHELL_COMMAND_CONTROL` is set to `allowlist`. Default: None
 - `SHELL_COMMAND_CONTROL`: Whether to use `allowlist` or `denylist` to determine what shell commands can be executed (Default: denylist)
 - `SHELL_DENYLIST`: List of shell commands that ARE NOT allowed to be executed by Auto-GPT. Only applies if `SHELL_COMMAND_CONTROL` is set to `denylist`. Default: sudo,su
-- `SMART_LLM`: LLM Model to use for "smart" tasks. Default: gpt-4
+- `SMART_LLM`: LLM Model to use for "smart" tasks. Default: bitnet-b1.58
 - `STREAMELEMENTS_VOICE`: StreamElements voice to use. Default: Brian
-- `TEMPERATURE`: Value of temperature given to OpenAI. Value from 0 to 2. Lower is more deterministic, higher is more random. See https://platform.openai.com/docs/api-reference/completions/create#completions/create-temperature
+- `TEMPERATURE`: Sampling temperature for the local LLM (0–2). Lower is more deterministic.
 - `TEXT_TO_SPEECH_PROVIDER`: Text to Speech Provider. Options are `gtts`, `macos`, `elevenlabs`, and `streamelements`. Default: gtts
 - `USER_AGENT`: User-Agent given when browsing websites. Default: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.97 Safari/537.36"
 - `USE_AZURE`: Use Azure's LLM Default: False

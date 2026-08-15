@@ -3,8 +3,6 @@ import re
 from typing import Any, Callable
 from urllib.parse import urljoin, urlparse
 
-from requests.compat import urljoin
-
 
 def validate_url(func: Callable[..., Any]) -> Any:
     """The method decorator validate_url is used to validate urls for any command that requires
@@ -66,8 +64,11 @@ def sanitize_url(url: str) -> str:
         str: The sanitized URL
     """
     parsed_url = urlparse(url)
-    reconstructed_url = f"{parsed_url.path}{parsed_url.params}?{parsed_url.query}"
-    return urljoin(url, reconstructed_url)
+    # Python 3.14+ urljoin keeps a trailing "?" when query is empty; omit it.
+    reconstructed = f"{parsed_url.path}{parsed_url.params}"
+    if parsed_url.query:
+        reconstructed = f"{reconstructed}?{parsed_url.query}"
+    return urljoin(url, reconstructed)
 
 
 def check_local_file_access(url: str) -> bool:
