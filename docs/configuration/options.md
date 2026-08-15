@@ -29,8 +29,15 @@ Configuration is controlled through the `Config` object. You can set configurati
 - `IMAGE_PROVIDER`: Image provider. Options are `huggingface` and `sdwebui` (DALL-E removed). Default: huggingface
 - `IMAGE_SIZE`: Default size of image to generate. Default: 256
 - `BITNET_MODEL_PATH`: *REQUIRED* — path to a local BitNet (or compatible) GGUF model.
-- `BITNET_N_CTX`: llama.cpp context size. Default: 4096
-- `BITNET_N_THREADS`: llama.cpp thread count. Default: CPU count
+- `BITNET_EMBED_MODEL_PATH`: Optional BitNet embedding GGUF (e.g. BitNet-embedding-0.6B).
+- `BITNET_BACKEND`: `auto` (default), `bitnet.cpp`, or `llama-cpp`.
+- `BITNET_HOME` / `BITNET_CLI`: Path to microsoft/BitNet checkout or `llama-cli` binary.
+- `BITNET_N_CTX`: Context size. Default: 4096 (BitNet-b1.58-2B-4T native).
+- `BITNET_N_BATCH` / `BITNET_N_UBATCH`: Prefill batch sizes. Default: 512.
+- `BITNET_N_THREADS` / `BITNET_N_THREADS_BATCH`: CPU threads for generate / prefill.
+- `BITNET_N_GPU_LAYERS`: GPU offload layers (0 = CPU; use with BitNet GPU builds).
+- `BITNET_CHAT_FORMAT`: Chat template name for llama-cpp-python. Default: llama-3.
+- `BITNET_EMBED_DIMS`: Embedding vector size for hash fallback / metadata. Default: 1024
 - `MEMORY_BACKEND`: Memory back-end to use. Currently `json_file` is the only supported and enabled backend. Default: json_file
 - `MEMORY_INDEX`: Value used in the Memory backend for scoping, naming, or indexing. Default: auto-gpt
 - `PLAIN_OUTPUT`: Plain output, which disables the spinner. Default: False
