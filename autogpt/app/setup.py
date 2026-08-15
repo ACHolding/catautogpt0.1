@@ -257,7 +257,7 @@ def generate_aiconfig_automatic(user_prompt: str, config: Config) -> AIConfig:
         ),
         config,
         temperature=0.1,
-        max_tokens=768,
+        max_tokens=384,
     ).content
 
     # Debug LLM Output
