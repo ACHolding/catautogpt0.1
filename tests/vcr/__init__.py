@@ -1,7 +1,6 @@
 import os
 from hashlib import sha256
 
-import openai.api_requestor
 import pytest
 from pytest_mock import MockerFixture
 
@@ -50,47 +49,7 @@ def vcr_cassette_dir(request):
     return os.path.join("tests/Auto-GPT-test-cassettes", test_name)
 
 
-def patch_api_base(requestor: openai.api_requestor.APIRequestor):
-    new_api_base = f"{PROXY}/v1"
-    requestor.api_base = new_api_base
-    return requestor
-
-
 @pytest.fixture
 def patched_api_requestor(mocker: MockerFixture):
-    init_requestor = openai.api_requestor.APIRequestor.__init__
-    prepare_request = openai.api_requestor.APIRequestor._prepare_request_raw
-
-    def patched_init_requestor(requestor, *args, **kwargs):
-        init_requestor(requestor, *args, **kwargs)
-        patch_api_base(requestor)
-
-    def patched_prepare_request(self, *args, **kwargs):
-        url, headers, data = prepare_request(self, *args, **kwargs)
-
-        if PROXY:
-            headers["AGENT-MODE"] = os.environ.get("AGENT_MODE")
-            headers["AGENT-TYPE"] = os.environ.get("AGENT_TYPE")
-
-        print(
-            f"[DEBUG] Outgoing API request: {headers}\n{data.decode() if data else None}"
-        )
-
-        # Add hash header for cheap & fast matching on cassette playback
-        headers["X-Content-Hash"] = sha256(
-            freeze_request_body(data), usedforsecurity=False
-        ).hexdigest()
-
-        return url, headers, data
-
-    if PROXY:
-        mocker.patch.object(
-            openai.api_requestor.APIRequestor,
-            "__init__",
-            new=patched_init_requestor,
-        )
-    mocker.patch.object(
-        openai.api_requestor.APIRequestor,
-        "_prepare_request_raw",
-        new=patched_prepare_request,
-    )
+    """No-op under BitNet (no OpenAI HTTP client). Kept for challenge test fixtures."""
+    yield

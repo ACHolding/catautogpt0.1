@@ -5,6 +5,7 @@ from typing import List, Literal, Optional
 from colorama import Fore
 
 from autogpt.config import Config
+from autogpt.logs import logger
 
 from ..api_manager import ApiManager
 from ..base import (

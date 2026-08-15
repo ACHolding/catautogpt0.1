@@ -1,32 +1,35 @@
+from __future__ import annotations
+
 import abc
 import typing
 from typing import Any, Generic, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def UserConfigurable(*args, **kwargs):
-    return Field(*args, **kwargs, user_configurable=True)
+    extra = kwargs.pop("json_schema_extra", None)
+    if extra is None:
+        extra = {"user_configurable": True}
+    elif isinstance(extra, dict):
+        extra = {**extra, "user_configurable": True}
+    return Field(*args, **kwargs, json_schema_extra=extra)
 
 
 class SystemConfiguration(BaseModel):
+    model_config = ConfigDict(extra="forbid", use_enum_values=True)
+
     def get_user_config(self) -> dict[str, Any]:
         return _get_user_config_fields(self)
-
-    class Config:
-        extra = "forbid"
-        use_enum_values = True
 
 
 class SystemSettings(BaseModel):
     """A base class for all system settings."""
 
+    model_config = ConfigDict(extra="forbid", use_enum_values=True)
+
     name: str
     description: str
-
-    class Config:
-        extra = "forbid"
-        use_enum_values = True
 
 
 S = TypeVar("S", bound=SystemSettings)
@@ -46,10 +49,10 @@ class Configurable(abc.ABC, Generic[S]):
     def build_agent_configuration(cls, configuration: dict) -> S:
         """Process the configuration for this object."""
 
-        defaults = cls.default_settings.dict()
+        defaults = cls.default_settings.model_dump()
         final_configuration = deep_update(defaults, configuration)
 
-        return cls.default_settings.__class__.parse_obj(final_configuration)
+        return cls.default_settings.__class__.model_validate(final_configuration)
 
 
 def _get_user_config_fields(instance: BaseModel) -> dict[str, Any]:
@@ -65,8 +68,9 @@ def _get_user_config_fields(instance: BaseModel) -> dict[str, Any]:
     user_config_fields = {}
 
     for name, value in instance.__dict__.items():
-        field_info = instance.__fields__[name]
-        if "user_configurable" in field_info.field_info.extra:
+        field_info = instance.model_fields[name]
+        extra = field_info.json_schema_extra or {}
+        if isinstance(extra, dict) and extra.get("user_configurable"):
             user_config_fields[name] = value
         elif isinstance(value, SystemConfiguration):
             user_config_fields[name] = value.get_user_config()

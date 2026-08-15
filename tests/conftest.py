@@ -49,8 +49,8 @@ def config(
     temp_plugins_config_file: str, mocker: MockerFixture, workspace: Workspace
 ) -> Config:
     config = ConfigBuilder.build_config_from_env(workspace.root.parent)
-    if not os.environ.get("OPENAI_API_KEY"):
-        os.environ["OPENAI_API_KEY"] = "sk-dummy"
+    if not os.environ.get("BITNET_MODEL_PATH"):
+        os.environ["BITNET_MODEL_PATH"] = "/tmp/dummy-bitnet.gguf"
 
     config.workspace_path = workspace.root
 
@@ -64,7 +64,7 @@ def config(
     from autogpt.plugins.plugins_config import PluginsConfig
 
     config.plugins_config = PluginsConfig.load_config(
-        plugins_config_file=config.plugins_config_file,
+        plugins_config_file=Path(config.plugins_config_file),
         plugins_denylist=config.plugins_denylist,
         plugins_allowlist=config.plugins_allowlist,
     )

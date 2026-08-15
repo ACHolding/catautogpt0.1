@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 from math import ceil, floor
-from typing import TYPE_CHECKING, Literal, Optional, Type, TypedDict, TypeVar, overload
+from typing import TYPE_CHECKING, Literal, Optional, Self, TypedDict, overload
 
 if TYPE_CHECKING:
     from autogpt.llm.providers.openai import OpenAIFunctionCall
@@ -82,10 +82,6 @@ class EmbeddingModelInfo(ModelInfo):
     embedding_dimensions: int
 
 
-# Can be replaced by Self in Python 3.11
-TChatSequence = TypeVar("TChatSequence", bound="ChatSequence")
-
-
 @dataclass
 class ChatSequence:
     """Utility container for a chat sequence"""
@@ -98,10 +94,10 @@ class ChatSequence:
         ...
 
     @overload
-    def __getitem__(self: TChatSequence, key: slice) -> TChatSequence:
+    def __getitem__(self, key: slice) -> Self:
         ...
 
-    def __getitem__(self: TChatSequence, key: int | slice) -> Message | TChatSequence:
+    def __getitem__(self, key: int | slice) -> Message | Self:
         if isinstance(key, slice):
             copy = deepcopy(self)
             copy.messages = self.messages[key]
@@ -134,11 +130,11 @@ class ChatSequence:
 
     @classmethod
     def for_model(
-        cls: Type[TChatSequence],
+        cls,
         model_name: str,
         messages: list[Message] | ChatSequence = [],
         **kwargs,
-    ) -> TChatSequence:
+    ) -> Self:
         from autogpt.llm.providers.openai import OPEN_AI_CHAT_MODELS
 
         if not model_name in OPEN_AI_CHAT_MODELS:

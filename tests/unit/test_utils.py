@@ -110,8 +110,12 @@ def test_get_latest_bulletin_no_file():
     if os.path.exists("data/CURRENT_BULLETIN.md"):
         os.remove("data/CURRENT_BULLETIN.md")
 
-    bulletin, is_new = get_latest_bulletin()
-    assert is_new
+    with patch(
+        "autogpt.app.utils.get_bulletin_from_web", return_value="Fresh bulletin"
+    ):
+        bulletin, is_new = get_latest_bulletin()
+        assert is_new
+        assert "Fresh bulletin" in bulletin
 
 
 def test_get_latest_bulletin_with_file():

@@ -3,8 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterator
 
-import orjson
-
+from autogpt.compat import json_lib
 from autogpt.config import Config
 from autogpt.logs import logger
 
@@ -15,7 +14,7 @@ from .base import VectorMemoryProvider
 class JSONFileMemory(VectorMemoryProvider):
     """Memory backend that stores memories in a JSON file"""
 
-    SAVE_OPTIONS = orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_SERIALIZE_DATACLASS
+    SAVE_OPTIONS = json_lib.OPT_SERIALIZE_NUMPY | json_lib.OPT_SERIALIZE_DATACLASS
 
     file_path: Path
     memories: list[MemoryItem]
@@ -76,11 +75,11 @@ class JSONFileMemory(VectorMemoryProvider):
             return
         with self.file_path.open("r") as f:
             logger.debug(f"Loading memories from index file '{self.file_path}'")
-            json_index = orjson.loads(f.read())
+            json_index = json_lib.loads(f.read())
             for memory_item_dict in json_index:
                 self.memories.append(MemoryItem(**memory_item_dict))
 
     def save_index(self):
         logger.debug(f"Saving memory index to file {self.file_path}")
         with self.file_path.open("wb") as f:
-            return f.write(orjson.dumps(self.memories, option=self.SAVE_OPTIONS))
+            return f.write(json_lib.dumps(self.memories, option=self.SAVE_OPTIONS))

@@ -1,5 +1,6 @@
 import os
 
+import pytest
 import yaml
 
 from autogpt.config.config import Config
@@ -14,6 +15,13 @@ PLUGIN_TEST_OPENAI = "https://weathergpt.vercel.app/"
 
 
 def test_scan_plugins_openai(config: Config):
+    import openapi_python_client
+
+    if not hasattr(openapi_python_client, "create_new_client"):
+        pytest.skip(
+            "Installed openapi-python-client no longer supports create_new_client()"
+        )
+
     config.plugins_openai = [PLUGIN_TEST_OPENAI]
     plugins_config = config.plugins_config
     plugins_config.plugins[PLUGIN_TEST_OPENAI] = PluginConfig(
