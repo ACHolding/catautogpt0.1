@@ -36,7 +36,7 @@ def count_message_tokens(
     if isinstance(messages, Message):
         messages = [messages]
 
-    if model.startswith("gpt-3.5-turbo"):
+    if model.startswith("gpt-3.5-turbo") or model.startswith("bitnet"):
         tokens_per_message = (
             4  # every message follows <|start|>{role/name}\n{content}<|end|>\n
         )

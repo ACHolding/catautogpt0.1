@@ -3,10 +3,8 @@ import functools
 import logging
 import math
 import time
+from types import SimpleNamespace
 from typing import Callable, ParamSpec, TypeVar
-
-import openai
-from openai.error import APIError, RateLimitError
 
 from autogpt.core.configuration import (
     Configurable,
@@ -17,7 +15,6 @@ from autogpt.core.resource.model_providers.schema import (
     Embedding,
     EmbeddingModelProvider,
     EmbeddingModelProviderModelInfo,
-    EmbeddingModelProviderModelResponse,
     LanguageModelFunction,
     LanguageModelMessage,
     LanguageModelProvider,
@@ -36,6 +33,7 @@ OpenAIChatParser = Callable[[str], dict]
 
 
 class OpenAIModelName(str, enum.Enum):
+    # Values remain OpenAI-compatible aliases; the BitNet provider resolves them locally.
     ADA = "text-embedding-ada-002"
     GPT3 = "gpt-3.5-turbo-0613"
     GPT3_16K = "gpt-3.5-turbo-16k-0613"
@@ -48,10 +46,10 @@ OPEN_AI_EMBEDDING_MODELS = {
         name=OpenAIModelName.ADA,
         service=ModelProviderService.EMBEDDING,
         provider_name=ModelProviderName.OPENAI,
-        prompt_token_cost=0.0004,
+        prompt_token_cost=0.0,
         completion_token_cost=0.0,
         max_tokens=8191,
-        embedding_dimensions=1536,
+        embedding_dimensions=384,
     ),
 }
 
@@ -61,33 +59,33 @@ OPEN_AI_LANGUAGE_MODELS = {
         name=OpenAIModelName.GPT3,
         service=ModelProviderService.LANGUAGE,
         provider_name=ModelProviderName.OPENAI,
-        prompt_token_cost=0.0015,
-        completion_token_cost=0.002,
+        prompt_token_cost=0.0,
+        completion_token_cost=0.0,
         max_tokens=4096,
     ),
     OpenAIModelName.GPT3_16K: LanguageModelProviderModelInfo(
-        name=OpenAIModelName.GPT3,
+        name=OpenAIModelName.GPT3_16K,
         service=ModelProviderService.LANGUAGE,
         provider_name=ModelProviderName.OPENAI,
-        prompt_token_cost=0.003,
-        completion_token_cost=0.002,
-        max_tokens=16384,
+        prompt_token_cost=0.0,
+        completion_token_cost=0.0,
+        max_tokens=8192,
     ),
     OpenAIModelName.GPT4: LanguageModelProviderModelInfo(
         name=OpenAIModelName.GPT4,
         service=ModelProviderService.LANGUAGE,
         provider_name=ModelProviderName.OPENAI,
-        prompt_token_cost=0.03,
-        completion_token_cost=0.06,
-        max_tokens=8192,
+        prompt_token_cost=0.0,
+        completion_token_cost=0.0,
+        max_tokens=4096,
     ),
     OpenAIModelName.GPT4_32K: LanguageModelProviderModelInfo(
         name=OpenAIModelName.GPT4_32K,
         service=ModelProviderService.LANGUAGE,
         provider_name=ModelProviderName.OPENAI,
-        prompt_token_cost=0.06,
-        completion_token_cost=0.12,
-        max_tokens=32768,
+        prompt_token_cost=0.0,
+        completion_token_cost=0.0,
+        max_tokens=8192,
     ),
 }
 
@@ -120,7 +118,7 @@ class OpenAIProvider(
 ):
     default_settings = OpenAISettings(
         name="openai_provider",
-        description="Provides access to OpenAI's API.",
+        description="Provides access to a local BitNet LLM (llama.cpp).",
         configuration=OpenAIConfiguration(
             retries_per_request=10,
         ),
@@ -174,7 +172,7 @@ class OpenAIProvider(
         completion_parser: Callable[[dict], dict],
         **kwargs,
     ) -> LanguageModelProviderModelResponse:
-        """Create a completion using the OpenAI API."""
+        """Create a completion using the local BitNet model."""
         completion_kwargs = self._get_completion_kwargs(model_name, functions, **kwargs)
         response = await self._create_completion(
             messages=model_prompt,
@@ -186,9 +184,18 @@ class OpenAIProvider(
             "completion_tokens_used": response.usage.completion_tokens,
         }
 
-        parsed_response = completion_parser(
-            response.choices[0].message.to_dict_recursive()
-        )
+        message = response.choices[0].message
+        if hasattr(message, "to_dict_recursive"):
+            parsed_payload = message.to_dict_recursive()
+        elif isinstance(message, dict):
+            parsed_payload = message
+        else:
+            parsed_payload = {
+                "role": "assistant",
+                "content": getattr(message, "content", ""),
+            }
+
+        parsed_response = completion_parser(parsed_payload)
         response = LanguageModelProviderModelResponse(
             content=parsed_response, **response_args
         )
@@ -202,18 +209,18 @@ class OpenAIProvider(
         embedding_parser: Callable[[Embedding], Embedding],
         **kwargs,
     ) -> EmbeddingModelProviderModelResponse:
-        """Create an embedding using the OpenAI API."""
+        """Create an embedding using the local BitNet model."""
         embedding_kwargs = self._get_embedding_kwargs(model_name, **kwargs)
         response = await self._create_embedding(text=text, **embedding_kwargs)
 
         response_args = {
             "model_info": OPEN_AI_EMBEDDING_MODELS[model_name],
-            "prompt_tokens_used": response.usage.prompt_tokens,
-            "completion_tokens_used": response.usage.completion_tokens,
+            "prompt_tokens_used": getattr(response.usage, "prompt_tokens", 0),
+            "completion_tokens_used": getattr(response.usage, "completion_tokens", 0),
         }
         response = EmbeddingModelProviderModelResponse(
             **response_args,
-            embedding=embedding_parser(response.embeddings[0]),
+            embedding=embedding_parser(response.data[0]["embedding"]),
         )
         self._budget.update_usage_and_cost(response)
         return response
@@ -224,24 +231,12 @@ class OpenAIProvider(
         functions: list[LanguageModelFunction],
         **kwargs,
     ) -> dict:
-        """Get kwargs for completion API call.
-
-        Args:
-            model: The model to use.
-            kwargs: Keyword arguments to override the default values.
-
-        Returns:
-            The kwargs for the chat API call.
-
-        """
         completion_kwargs = {
             "model": model_name,
             **kwargs,
-            **self._credentials.unmasked(),
         }
         if functions:
             completion_kwargs["functions"] = functions
-
         return completion_kwargs
 
     def _get_embedding_kwargs(
@@ -249,63 +244,42 @@ class OpenAIProvider(
         model_name: OpenAIModelName,
         **kwargs,
     ) -> dict:
-        """Get kwargs for embedding API call.
-
-        Args:
-            model: The model to use.
-            kwargs: Keyword arguments to override the default values.
-
-        Returns:
-            The kwargs for the embedding API call.
-
-        """
-        embedding_kwargs = {
+        return {
             "model": model_name,
             **kwargs,
-            **self._credentials.unmasked(),
         }
 
-        return embedding_kwargs
-
     def __repr__(self):
-        return "OpenAIProvider()"
+        return "OpenAIProvider(BitNet)"
 
 
-async def _create_embedding(text: str, *_, **kwargs) -> openai.Embedding:
-    """Embed text using the OpenAI API.
+async def _create_embedding(text: str, *_, **kwargs):
+    """Embed text using the local BitNet provider."""
+    import asyncio
 
-    Args:
-        text str: The text to embed.
-        model_name str: The name of the model to use.
+    from autogpt.llm.providers import openai as bitnet
 
-    Returns:
-        str: The embedding.
-    """
-    return await openai.Embedding.acreate(
-        input=[text],
-        **kwargs,
-    )
+    result = await asyncio.to_thread(bitnet.create_embedding, text, **kwargs)
+    if not hasattr(result, "usage"):
+        result.usage = SimpleNamespace(prompt_tokens=0, completion_tokens=0)
+    if not hasattr(result, "embeddings"):
+        result.embeddings = [item["embedding"] for item in result.data]
+    return result
 
 
-async def _create_completion(
-    messages: list[LanguageModelMessage], *_, **kwargs
-) -> openai.Completion:
-    """Create a chat completion using the OpenAI API.
+async def _create_completion(messages: list[LanguageModelMessage], *_, **kwargs):
+    """Create a chat completion using the local BitNet provider."""
+    import asyncio
 
-    Args:
-        messages: The prompt to use.
+    from autogpt.llm.providers import openai as bitnet
 
-    Returns:
-        The completion.
-
-    """
-    messages = [message.model_dump() for message in messages]
-    if "functions" in kwargs:
-        kwargs["functions"] = [function.json_schema for function in kwargs["functions"]]
-    return await openai.ChatCompletion.acreate(
-        messages=messages,
-        **kwargs,
-    )
+    payload = [
+        message.model_dump() if hasattr(message, "model_dump") else dict(message)
+        for message in messages
+    ]
+    # Function calling is not supported on local BitNet; drop unused kwargs.
+    kwargs.pop("functions", None)
+    return await asyncio.to_thread(bitnet.create_chat_completion, payload, **kwargs)
 
 
 _T = TypeVar("_T")
@@ -313,20 +287,9 @@ _P = ParamSpec("_P")
 
 
 class _OpenAIRetryHandler:
-    """Retry Handler for OpenAI API call.
+    """Retry handler for local BitNet inference."""
 
-    Args:
-        num_retries int: Number of retries. Defaults to 10.
-        backoff_base float: Base for exponential backoff. Defaults to 2.
-        warn_user bool: Whether to warn the user. Defaults to True.
-    """
-
-    _retry_limit_msg = "Error: Reached rate limit, passing..."
-    _api_key_error_msg = (
-        "Please double check that you have setup a PAID OpenAI API Account. You can "
-        "read more here: https://docs.agpt.co/setup/#getting-an-api-key"
-    )
-    _backoff_msg = "Error: API Bad gateway. Waiting {backoff} seconds..."
+    _backoff_msg = "Error: BitNet call failed. Waiting {backoff} seconds..."
 
     def __init__(
         self,
@@ -340,12 +303,6 @@ class _OpenAIRetryHandler:
         self._backoff_base = backoff_base
         self._warn_user = warn_user
 
-    def _log_rate_limit_error(self) -> None:
-        self._logger.debug(self._retry_limit_msg)
-        if self._warn_user:
-            self._logger.warning(self._api_key_error_msg)
-            self._warn_user = False
-
     def _backoff(self, attempt: int) -> None:
         backoff = self._backoff_base ** (attempt + 2)
         self._logger.debug(self._backoff_msg.format(backoff=backoff))
@@ -354,20 +311,13 @@ class _OpenAIRetryHandler:
     def __call__(self, func: Callable[_P, _T]) -> Callable[_P, _T]:
         @functools.wraps(func)
         async def _wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-            num_attempts = self._num_retries + 1  # +1 for the first attempt
+            num_attempts = self._num_retries + 1
             for attempt in range(1, num_attempts + 1):
                 try:
                     return await func(*args, **kwargs)
-
-                except RateLimitError:
+                except Exception:
                     if attempt == num_attempts:
                         raise
-                    self._log_rate_limit_error()
-
-                except APIError as e:
-                    if (e.http_status != 502) or (attempt == num_attempts):
-                        raise
-
-                self._backoff(attempt)
+                    self._backoff(attempt)
 
         return _wrapped

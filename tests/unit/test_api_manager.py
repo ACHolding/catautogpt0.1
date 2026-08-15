@@ -1,5 +1,3 @@
-from unittest.mock import patch
-
 import pytest
 from pytest_mock import MockerFixture
 
@@ -77,10 +75,9 @@ class TestApiManager:
 
     @staticmethod
     def test_get_models():
-        """Test if getting models works correctly."""
-        with patch("openai.Model.list") as mock_list_models:
-            mock_list_models.return_value = {"data": [{"id": "gpt-3.5-turbo"}]}
-            result = api_manager.get_models()
+        """Local BitNet model catalog (no cloud API)."""
+        result = api_manager.get_models()
 
-            assert result[0]["id"] == "gpt-3.5-turbo"
-            assert api_manager.models[0]["id"] == "gpt-3.5-turbo"
+        assert any(m["id"] == "bitnet-b1.58" for m in result)
+        assert api_manager.models is not None
+        assert any(m["id"] == "bitnet-b1.58" for m in api_manager.models)

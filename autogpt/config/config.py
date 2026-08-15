@@ -22,8 +22,8 @@ AZURE_CONFIG_FILE = "azure.yaml"
 PLUGINS_CONFIG_FILE = "plugins_config.yaml"
 PROMPT_SETTINGS_FILE = "prompt_settings.yaml"
 
-GPT_4_MODEL = "gpt-4"
-GPT_3_MODEL = "gpt-3.5-turbo"
+GPT_4_MODEL = "bitnet-b1.58"
+GPT_3_MODEL = "bitnet-b1.58"
 
 
 class Config(SystemSettings):
@@ -61,15 +61,18 @@ class Config(SystemSettings):
     workspace_path: Path | None = None
     file_logger_path: Path | None = None
     # Model configuration
-    fast_llm: str = "gpt-3.5-turbo"
-    smart_llm: str = "gpt-4-0314"
+    fast_llm: str = "bitnet-b1.58"
+    smart_llm: str = "bitnet-b1.58"
     temperature: float = 0
     openai_functions: bool = False
-    embedding_model: str = "text-embedding-ada-002"
+    embedding_model: str = "bitnet-embed"
     browse_spacy_language_model: str = "en_core_web_sm"
     # Run loop configuration
     continuous_mode: bool = False
     continuous_limit: int = 0
+
+    # Local BitNet / llama.cpp
+    bitnet_model_path: str | None = None
 
     ##########
     # Memory #
@@ -168,15 +171,8 @@ class Config(SystemSettings):
         return self
 
     def get_openai_credentials(self, model: str) -> dict[str, str]:
-        credentials = {
-            "api_key": self.openai_api_key,
-            "api_base": self.openai_api_base,
-            "organization": self.openai_organization,
-        }
-        if self.use_azure:
-            azure_credentials = self.get_azure_credentials(model)
-            credentials.update(azure_credentials)
-        return credentials
+        """Legacy hook — BitNet runs locally and needs no cloud credentials."""
+        return {}
 
     def get_azure_credentials(self, model: str) -> dict[str, str]:
         """Get the kwargs for the Azure API."""
@@ -249,6 +245,9 @@ class ConfigBuilder(Configurable[Config]):
             "smart_llm": os.getenv("SMART_LLM", os.getenv("SMART_LLM_MODEL")),
             "embedding_model": os.getenv("EMBEDDING_MODEL"),
             "browse_spacy_language_model": os.getenv("BROWSE_SPACY_LANGUAGE_MODEL"),
+            "bitnet_model_path": os.getenv(
+                "BITNET_MODEL_PATH", os.getenv("LLM_MODEL_PATH")
+            ),
             "openai_api_key": os.getenv("OPENAI_API_KEY"),
             "use_azure": os.getenv("USE_AZURE") == "True",
             "azure_config_file": os.getenv("AZURE_CONFIG_FILE", AZURE_CONFIG_FILE),
@@ -382,90 +381,47 @@ class ConfigBuilder(Configurable[Config]):
         }
 
 
-def _looks_like_placeholder_api_key(key: str) -> bool:
-    lowered = key.strip().lower()
-    placeholders = {
-        "",
-        "your-openai-api-key",
-        "sk-dummy",
-        "sk-xxx",
-        "none",
-        "null",
-        "changeme",
-    }
-    if lowered in placeholders:
-        return True
-    if "your-openai" in lowered or "api-key-here" in lowered or "replace-me" in lowered:
-        return True
-    return False
+def check_bitnet_model(config: Config) -> None:
+    """Ensure a local BitNet GGUF model is available."""
+    from autogpt.llm.providers.openai import _resolve_model_path, get_bitnet_llm
+
+    # Prefer explicit config / env path.
+    if config.bitnet_model_path:
+        os.environ.setdefault("BITNET_MODEL_PATH", config.bitnet_model_path)
+
+    try:
+        path = _resolve_model_path()
+    except FileNotFoundError as err:
+        print(Fore.RED + str(err) + Fore.RESET)
+        print(
+            Fore.YELLOW
+            + "Download example:\n"
+            + "  huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf "
+            + "--local-dir models/BitNet-b1.58-2B-4T\n"
+            + "  echo BITNET_MODEL_PATH=models/BitNet-b1.58-2B-4T/*.gguf >> .env"
+            + Fore.RESET
+        )
+        raise SystemExit(2) from err
+
+    config.bitnet_model_path = str(path)
+    os.environ["BITNET_MODEL_PATH"] = str(path)
+
+    # Warm-load so failures surface at startup, not mid-run.
+    try:
+        get_bitnet_llm()
+    except SystemExit:
+        raise
+    except Exception as err:
+        print(Fore.RED + f"Failed to load BitNet model: {err}" + Fore.RESET)
+        raise SystemExit(2) from err
+
+    print(Fore.GREEN + f"BitNet model ready: {path}" + Fore.RESET)
 
 
-def _is_plausible_openai_api_key(key: str) -> bool:
-    key = key.strip()
-    if _looks_like_placeholder_api_key(key):
-        return False
-    # Current OpenAI user keys: sk-... / sk-proj-... ; Azure keys vary.
-    if key.startswith("sk-") and len(key) >= 20:
-        return True
-    return len(key) >= 20
-
-
+# Backwards-compatible name used by older call sites / tests.
 def check_openai_api_key(config: Config) -> None:
-    """Check if the OpenAI API key is set and looks usable."""
-    key = (config.openai_api_key or "").strip()
-
-    if key and _is_plausible_openai_api_key(key):
-        return
-
-    if key and _looks_like_placeholder_api_key(key):
-        print(
-            Fore.RED
-            + "OPENAI_API_KEY is still a placeholder (e.g. your-openai-api-key)."
-            + Fore.RESET
-        )
-    elif key:
-        print(Fore.RED + "OPENAI_API_KEY does not look valid." + Fore.RESET)
-    else:
-        print(
-            Fore.RED
-            + "Please set your OpenAI API key in .env or as an environment variable."
-            + Fore.RESET
-        )
-
-    print("You can get your key from https://platform.openai.com/account/api-keys")
-    print(
-        Fore.YELLOW
-        + f"Hint: copy {_PROJECT_ENV_HINT} to .env and set OPENAI_API_KEY=sk-..."
-        + Fore.RESET
-    )
-
-    # Non-interactive / continuous mode: fail fast with a stable exit code.
-    if not sys.stdin.isatty() or config.continuous_mode or config.skip_reprompt:
-        print(
-            Fore.RED
-            + "Refusing to start without a valid OPENAI_API_KEY "
-            "(exit code 2 = configuration/auth error)."
-            + Fore.RESET
-        )
-        raise SystemExit(2)
-
-    openai_api_key = input(
-        "If you do have the key, please enter your OpenAI API key now:\n"
-    ).strip()
-    if _is_plausible_openai_api_key(openai_api_key):
-        os.environ["OPENAI_API_KEY"] = openai_api_key
-        config.openai_api_key = openai_api_key
-        print(
-            Fore.GREEN
-            + "OpenAI API key successfully set!\n"
-            + Fore.YELLOW
-            + "NOTE: The API key you've set is only temporary.\n"
-            + "For longer sessions, please set it in .env file"
-            + Fore.RESET
-        )
-    else:
-        print("Invalid OpenAI API key!")
-        raise SystemExit(2)
+    """Deprecated alias — Auto-GPT now uses local BitNet, not OpenAI API keys."""
+    check_bitnet_model(config)
 
 
 # Used in the hint above; resolved relative to the project root.

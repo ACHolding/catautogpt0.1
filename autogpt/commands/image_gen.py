@@ -9,7 +9,6 @@ import time
 import uuid
 from base64 import b64decode
 
-import openai
 import requests
 from PIL import Image
 
@@ -135,22 +134,10 @@ def generate_image_with_dalle(
         )
         size = closest
 
-    response = openai.Image.create(
-        prompt=prompt,
-        n=1,
-        size=f"{size}x{size}",
-        response_format="b64_json",
-        api_key=agent.config.openai_api_key,
+    raise RuntimeError(
+        "OpenAI DALL-E has been removed. Set IMAGE_PROVIDER=huggingface or "
+        "IMAGE_PROVIDER=sdwebui instead."
     )
-
-    logger.info(f"Image Generated for prompt:{prompt}")
-
-    image_data = b64decode(response["data"][0]["b64_json"])
-
-    with open(filename, mode="wb") as png:
-        png.write(image_data)
-
-    return f"Saved to disk:{filename}"
 
 
 def generate_image_with_sd_webui(

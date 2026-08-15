@@ -3,7 +3,7 @@
 # Restarts automatically if the process exits (crash, limit, etc.).
 # Stop with Ctrl+C.
 #
-# Exit code 2 = configuration/auth error (e.g. missing OPENAI_API_KEY):
+# Exit code 2 = configuration error (e.g. missing BITNET_MODEL_PATH):
 # the supervisor will NOT restart in that case.
 
 set -uo pipefail
@@ -31,10 +31,29 @@ fi
 
 if [[ ! -f "$SCRIPT_DIR/.env" ]]; then
     echo "Missing $SCRIPT_DIR/.env"
-    echo "Create one from the template and set OPENAI_API_KEY:"
+    echo "Create one from the template and set BITNET_MODEL_PATH:"
     echo "  cp .env.template .env"
-    echo "  # then edit .env and set OPENAI_API_KEY=sk-..."
+    echo "  # then edit .env and set BITNET_MODEL_PATH=/path/to/model.gguf"
     exit 2
+fi
+
+# shellcheck disable=SC1091
+set -a
+# Load .env for the supervisor pre-check (python also loads it).
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/.env" 2>/dev/null || true
+set +a
+
+if [[ -z "${BITNET_MODEL_PATH:-}${LLM_MODEL_PATH:-}" ]]; then
+    # Allow auto-discovery of models/*.gguf inside the project.
+    if ! compgen -G "$SCRIPT_DIR/models/**/*.gguf" >/dev/null \
+        && ! compgen -G "$SCRIPT_DIR/models/*.gguf" >/dev/null; then
+        echo "No BitNet GGUF model configured."
+        echo "Set BITNET_MODEL_PATH in .env, e.g.:"
+        echo "  huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf --local-dir models/BitNet-b1.58-2B-4T"
+        echo "  BITNET_MODEL_PATH=$SCRIPT_DIR/models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf"
+        exit 2
+    fi
 fi
 
 # Lightweight deps check (same as run.sh, but non-fatal).
@@ -84,9 +103,9 @@ while true; do
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Auto-GPT exited with code ${exit_code}."
     fi
 
-    # 2 = configuration/auth error — do not hammer the API in a restart loop.
+    # 2 = configuration error (missing BitNet model, etc.) — do not restart-loop.
     if [[ $exit_code -eq 2 ]]; then
-        echo "Configuration/auth error. Fix OPENAI_API_KEY in .env, then re-run."
+        echo "Configuration error. Fix BITNET_MODEL_PATH in .env, then re-run."
         exit 2
     fi
 
