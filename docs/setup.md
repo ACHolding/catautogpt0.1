@@ -5,7 +5,7 @@
 Choose an environment to run Auto-GPT in (pick one):
 
   - [Docker](https://docs.docker.com/get-docker/) (*recommended*)
-  - Python 3.10 or later (instructions: [for Windows](https://www.tutorialspoint.com/how-to-install-python-in-windows))
+  - Python 3.14 or later (instructions: [for Windows](https://www.tutorialspoint.com/how-to-install-python-in-windows))
   - [VSCode + devcontainer](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
 
 

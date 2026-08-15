@@ -4,13 +4,14 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 import yaml
 from auto_gpt_plugin_template import AutoGPTPluginTemplate
 from colorama import Fore
-from pydantic import Field, validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from autogpt.core.configuration.schema import Configurable, SystemSettings
 from autogpt.llm.providers.openai import OPEN_AI_CHAT_MODELS
@@ -25,7 +26,13 @@ GPT_4_MODEL = "gpt-4"
 GPT_3_MODEL = "gpt-3.5-turbo"
 
 
-class Config(SystemSettings, arbitrary_types_allowed=True):
+class Config(SystemSettings):
+    model_config = ConfigDict(
+        extra="forbid",
+        use_enum_values=True,
+        arbitrary_types_allowed=True,
+    )
+
     name: str = "Auto-GPT configuration"
     description: str = "Default configuration for the Auto-GPT application."
     ########################
@@ -42,7 +49,7 @@ class Config(SystemSettings, arbitrary_types_allowed=True):
     speak_mode: bool = False
     text_to_speech_provider: str = "gtts"
     streamelements_voice: str = "Brian"
-    elevenlabs_voice_id: Optional[str] = None
+    elevenlabs_voice_id: str | None = None
 
     ##########################
     # Agent Control Settings #
@@ -50,9 +57,9 @@ class Config(SystemSettings, arbitrary_types_allowed=True):
     # Paths
     ai_settings_file: str = AI_SETTINGS_FILE
     prompt_settings_file: str = PROMPT_SETTINGS_FILE
-    workdir: Path = None
-    workspace_path: Optional[Path] = None
-    file_logger_path: Optional[Path] = None
+    workdir: Path | None = None
+    workspace_path: Path | None = None
+    file_logger_path: Path | None = None
     # Model configuration
     fast_llm: str = "gpt-3.5-turbo"
     smart_llm: str = "gpt-4-0314"
@@ -138,24 +145,27 @@ class Config(SystemSettings, arbitrary_types_allowed=True):
     # Stable Diffusion
     sd_webui_auth: Optional[str] = None
 
-    @validator("plugins", each_item=True)
-    def validate_plugins(cls, p: AutoGPTPluginTemplate | Any):
-        assert issubclass(
-            p.__class__, AutoGPTPluginTemplate
-        ), f"{p} does not subclass AutoGPTPluginTemplate"
-        assert (
-            p.__class__.__name__ != "AutoGPTPluginTemplate"
-        ), f"Plugins must subclass AutoGPTPluginTemplate; {p} is a template instance"
-        return p
+    @field_validator("plugins")
+    @classmethod
+    def validate_plugins(cls, plugins: list[Any]):
+        for p in plugins:
+            assert issubclass(
+                p.__class__, AutoGPTPluginTemplate
+            ), f"{p} does not subclass AutoGPTPluginTemplate"
+            assert (
+                p.__class__.__name__ != "AutoGPTPluginTemplate"
+            ), f"Plugins must subclass AutoGPTPluginTemplate; {p} is a template instance"
+        return plugins
 
-    @validator("openai_functions")
-    def validate_openai_functions(cls, v: bool, values: dict[str, Any]):
-        if v:
-            smart_llm = values["smart_llm"]
+    @model_validator(mode="after")
+    def validate_openai_functions(self):
+        if self.openai_functions:
+            smart_llm = self.smart_llm
             assert OPEN_AI_CHAT_MODELS[smart_llm].supports_functions, (
                 f"Model {smart_llm} does not support OpenAI Functions. "
                 "Please disable OPENAI_FUNCTIONS or choose a suitable model."
             )
+        return self
 
     def get_openai_credentials(self, model: str) -> dict[str, str]:
         credentials = {
@@ -372,34 +382,94 @@ class ConfigBuilder(Configurable[Config]):
         }
 
 
+def _looks_like_placeholder_api_key(key: str) -> bool:
+    lowered = key.strip().lower()
+    placeholders = {
+        "",
+        "your-openai-api-key",
+        "sk-dummy",
+        "sk-xxx",
+        "none",
+        "null",
+        "changeme",
+    }
+    if lowered in placeholders:
+        return True
+    if "your-openai" in lowered or "api-key-here" in lowered or "replace-me" in lowered:
+        return True
+    return False
+
+
+def _is_plausible_openai_api_key(key: str) -> bool:
+    key = key.strip()
+    if _looks_like_placeholder_api_key(key):
+        return False
+    # Current OpenAI user keys: sk-... / sk-proj-... ; Azure keys vary.
+    if key.startswith("sk-") and len(key) >= 20:
+        return True
+    return len(key) >= 20
+
+
 def check_openai_api_key(config: Config) -> None:
-    """Check if the OpenAI API key is set in config.py or as an environment variable."""
-    if not config.openai_api_key:
+    """Check if the OpenAI API key is set and looks usable."""
+    key = (config.openai_api_key or "").strip()
+
+    if key and _is_plausible_openai_api_key(key):
+        return
+
+    if key and _looks_like_placeholder_api_key(key):
+        print(
+            Fore.RED
+            + "OPENAI_API_KEY is still a placeholder (e.g. your-openai-api-key)."
+            + Fore.RESET
+        )
+    elif key:
+        print(Fore.RED + "OPENAI_API_KEY does not look valid." + Fore.RESET)
+    else:
         print(
             Fore.RED
             + "Please set your OpenAI API key in .env or as an environment variable."
             + Fore.RESET
         )
-        print("You can get your key from https://platform.openai.com/account/api-keys")
-        openai_api_key = input(
-            "If you do have the key, please enter your OpenAI API key now:\n"
+
+    print("You can get your key from https://platform.openai.com/account/api-keys")
+    print(
+        Fore.YELLOW
+        + f"Hint: copy {_PROJECT_ENV_HINT} to .env and set OPENAI_API_KEY=sk-..."
+        + Fore.RESET
+    )
+
+    # Non-interactive / continuous mode: fail fast with a stable exit code.
+    if not sys.stdin.isatty() or config.continuous_mode or config.skip_reprompt:
+        print(
+            Fore.RED
+            + "Refusing to start without a valid OPENAI_API_KEY "
+            "(exit code 2 = configuration/auth error)."
+            + Fore.RESET
         )
-        key_pattern = r"^sk-\w{48}"
-        openai_api_key = openai_api_key.strip()
-        if re.search(key_pattern, openai_api_key):
-            os.environ["OPENAI_API_KEY"] = openai_api_key
-            config.openai_api_key = openai_api_key
-            print(
-                Fore.GREEN
-                + "OpenAI API key successfully set!\n"
-                + Fore.YELLOW
-                + "NOTE: The API key you've set is only temporary.\n"
-                + "For longer sessions, please set it in .env file"
-                + Fore.RESET
-            )
-        else:
-            print("Invalid OpenAI API key!")
-            exit(1)
+        raise SystemExit(2)
+
+    openai_api_key = input(
+        "If you do have the key, please enter your OpenAI API key now:\n"
+    ).strip()
+    if _is_plausible_openai_api_key(openai_api_key):
+        os.environ["OPENAI_API_KEY"] = openai_api_key
+        config.openai_api_key = openai_api_key
+        print(
+            Fore.GREEN
+            + "OpenAI API key successfully set!\n"
+            + Fore.YELLOW
+            + "NOTE: The API key you've set is only temporary.\n"
+            + "For longer sessions, please set it in .env file"
+            + Fore.RESET
+        )
+    else:
+        print("Invalid OpenAI API key!")
+        raise SystemExit(2)
+
+
+# Used in the hint above; resolved relative to the project root.
+_PROJECT_ENV_HINT = ".env.template"
 
 
 def _safe_split(s: Union[str, None], sep: str = ",") -> list[str]:

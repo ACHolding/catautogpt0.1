@@ -173,7 +173,23 @@ def check_model(
     """Check if model is available for use. If not, return gpt-3.5-turbo."""
     openai_credentials = config.get_openai_credentials(model_name)
     api_manager = ApiManager()
-    models = api_manager.get_models(**openai_credentials)
+    try:
+        models = api_manager.get_models(**openai_credentials)
+    except Exception as err:
+        # openai.error.AuthenticationError and network failures land here.
+        err_name = type(err).__name__
+        logger.typewriter_log(
+            "ERROR: ",
+            Fore.RED,
+            f"Failed to list OpenAI models ({err_name}): {err}",
+        )
+        logger.typewriter_log(
+            "HINT: ",
+            Fore.YELLOW,
+            "Set a valid OPENAI_API_KEY in the project .env file "
+            "(copy .env.template → .env). Exit code 2 = auth/config error.",
+        )
+        raise SystemExit(2) from err
 
     if any(model_name in m["id"] for m in models):
         return model_name

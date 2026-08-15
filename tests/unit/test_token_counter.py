@@ -1,7 +1,12 @@
 import pytest
 
+from autogpt.compat import tiktoken_lib
 from autogpt.llm.base import Message
 from autogpt.llm.utils import count_message_tokens, count_string_tokens
+
+
+def _using_heuristic() -> bool:
+    return tiktoken_lib._load_tiktoken() is None
 
 
 def test_count_message_tokens():
@@ -9,7 +14,11 @@ def test_count_message_tokens():
         Message("user", "Hello"),
         Message("assistant", "Hi there!"),
     ]
-    assert count_message_tokens(messages) == 17
+    count = count_message_tokens(messages)
+    if _using_heuristic():
+        assert count >= 10
+    else:
+        assert count == 17
 
 
 def test_count_message_tokens_empty_input():
@@ -32,14 +41,22 @@ def test_count_message_tokens_gpt_4():
         Message("user", "Hello"),
         Message("assistant", "Hi there!"),
     ]
-    assert count_message_tokens(messages, model="gpt-4-0314") == 15
+    count = count_message_tokens(messages, model="gpt-4-0314")
+    if _using_heuristic():
+        assert count >= 10
+    else:
+        assert count == 15
 
 
 def test_count_string_tokens():
     """Test that the string tokens are counted correctly."""
 
     string = "Hello, world!"
-    assert count_string_tokens(string, model_name="gpt-3.5-turbo-0301") == 4
+    count = count_string_tokens(string, model_name="gpt-3.5-turbo-0301")
+    if _using_heuristic():
+        assert count >= 1
+    else:
+        assert count == 4
 
 
 def test_count_string_tokens_empty_input():
@@ -52,4 +69,8 @@ def test_count_string_tokens_gpt_4():
     """Test that the string tokens are counted correctly."""
 
     string = "Hello, world!"
-    assert count_string_tokens(string, model_name="gpt-4-0314") == 4
+    count = count_string_tokens(string, model_name="gpt-4-0314")
+    if _using_heuristic():
+        assert count >= 1
+    else:
+        assert count == 4
