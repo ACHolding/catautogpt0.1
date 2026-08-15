@@ -77,14 +77,11 @@ def _default_threads() -> int:
 
 def resolve_chat_model_path() -> Path:
     """Locate the BitNet chat GGUF (prefer official i2_s filename)."""
-    candidates: list[Path] = []
-    for raw in (
-        os.getenv("BITNET_MODEL_PATH"),
-        os.getenv("LLM_MODEL_PATH"),
-    ):
-        if raw:
-            candidates.append(Path(raw).expanduser())
-
+    preferred_names = (
+        "ggml-model-i2_s.gguf",
+        "BitNet-b1.58-2B-4T.i2_s.gguf",
+        "bitnet-b1.58-2B-4T.i2_s.gguf",
+    )
     root = project_root()
     search_roots = [
         root / "models" / "BitNet-b1.58-2B-4T",
@@ -92,13 +89,14 @@ def resolve_chat_model_path() -> Path:
         root / "models",
         root,
     ]
-    preferred_names = (
-        "ggml-model-i2_s.gguf",
-        "BitNet-b1.58-2B-4T.i2_s.gguf",
-        "bitnet-b1.58-2B-4T.i2_s.gguf",
-    )
 
-    for path in candidates:
+    for raw in (
+        os.getenv("BITNET_MODEL_PATH"),
+        os.getenv("LLM_MODEL_PATH"),
+    ):
+        if not raw or not raw.strip():
+            continue
+        path = Path(raw).expanduser()
         if path.is_file():
             return path
         if path.is_dir():
@@ -108,11 +106,15 @@ def resolve_chat_model_path() -> Path:
                     return hit
             ggufs = sorted(path.glob("**/*.gguf"))
             if ggufs:
-                # Prefer i2_s (official BitNet quant) when several exist.
                 for g in ggufs:
                     if "i2_s" in g.name.lower() or "bitnet" in g.name.lower():
                         return g
                 return ggufs[0]
+        # Explicit path was set but missing — fail fast with a clear error.
+        raise FileNotFoundError(
+            f"BITNET_MODEL_PATH is set but not found: {path}\n"
+            "Fix .env or run ./scripts/setup_bitnet.sh"
+        )
 
     for base in search_roots:
         if not base.exists():
