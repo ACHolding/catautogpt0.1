@@ -29,7 +29,6 @@ class JSONFileMemory(VectorMemoryProvider):
             None
         """
         self.file_path = config.workspace_path / f"{config.memory_index}.json"
-        self.file_path.touch()
         logger.debug(
             f"Initialized {__class__.__name__} with index path {self.file_path}"
         )
@@ -40,7 +39,12 @@ class JSONFileMemory(VectorMemoryProvider):
             logger.debug(f"Loaded {len(self.memories)} MemoryItems from file")
         except Exception as e:
             logger.warn(f"Could not load MemoryItems from file: {e}")
+            self.memories = []
             self.save_index()
+        else:
+            # Ensure a valid index exists (empty touch() files used to blow up on load).
+            if (not self.file_path.is_file()) or self.file_path.stat().st_size == 0:
+                self.save_index()
 
     def __iter__(self) -> Iterator[MemoryItem]:
         return iter(self.memories)
@@ -73,11 +77,19 @@ class JSONFileMemory(VectorMemoryProvider):
         if not self.file_path.is_file():
             logger.debug(f"Index file '{self.file_path}' does not exist")
             return
-        with self.file_path.open("r") as f:
-            logger.debug(f"Loading memories from index file '{self.file_path}'")
-            json_index = json_lib.loads(f.read())
-            for memory_item_dict in json_index:
-                self.memories.append(MemoryItem(**memory_item_dict))
+        raw = self.file_path.read_text(encoding="utf-8").strip()
+        if not raw:
+            # touch() / interrupted writes leave an empty file; treat as fresh index.
+            logger.debug(f"Index file '{self.file_path}' is empty")
+            return
+        logger.debug(f"Loading memories from index file '{self.file_path}'")
+        json_index = json_lib.loads(raw)
+        if not isinstance(json_index, list):
+            raise ValueError(
+                f"Memory index must be a JSON list, got {type(json_index).__name__}"
+            )
+        for memory_item_dict in json_index:
+            self.memories.append(MemoryItem(**memory_item_dict))
 
     def save_index(self):
         logger.debug(f"Saving memory index to file {self.file_path}")

@@ -54,7 +54,7 @@ def get_embedding(
 
     logger.debug(
         f"Getting embedding{f's for {len(input)} inputs' if multiple else ''}"
-        f" with model '{model}' (local BitNet)"
+        f" with model '{model}' (local CatSeek)"
     )
 
     embeddings = iopenai.create_embedding(

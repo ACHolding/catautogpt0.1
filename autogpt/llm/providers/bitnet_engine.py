@@ -250,6 +250,9 @@ def apply_llama3_chat_template(
 def _validate_bitnetish(path: Path) -> None:
     name = path.name.lower()
     parent = str(path.parent).lower()
+    # CatSeek / DeepSeek GGUFs are intentionally aliased via BITNET_MODEL_PATH.
+    if any(token in name or token in parent for token in ("catseek", "deepseek", "qwen")):
+        return
     looks_bitnet = any(
         token in name or token in parent
         for token in ("bitnet", "i2_s", "tl1", "tl2", "b1.58", "b1_58")

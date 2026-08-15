@@ -4,8 +4,11 @@ from autogpt.prompts.generator import PromptGenerator
 
 DEFAULT_TRIGGERING_PROMPT = (
     "Determine exactly one command to use based on the given goals "
-    "and the progress you have made so far, "
-    "and respond using the JSON schema specified previously:"
+    "and the progress you have made so far. "
+    "Prefer a concrete action that advances the goals "
+    "(for example write_to_file, read_file, execute_python_file, or browse_website). "
+    "Do not use goals_accomplished or task_complete until the goals are actually done. "
+    "Respond using the JSON schema specified previously:"
 )
 
 
