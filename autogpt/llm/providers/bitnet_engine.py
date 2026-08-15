@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -228,8 +229,13 @@ def apply_llama3_chat_template(
     *,
     add_generation_prompt: bool = True,
 ) -> str:
-    """Format messages with the LLaMA 3 / BitNet instruct chat template."""
-    parts: list[str] = ["<|begin_of_text|>"]
+    """Format messages with the LLaMA 3 / BitNet instruct chat template.
+
+    Omits ``<|begin_of_text|>`` by default — llama-completion already injects BOS
+    from the model metadata (double-BOS degrades / can crash some builds).
+    """
+    include_bos = _env_bool("BITNET_PROMPT_BOS", False)
+    parts: list[str] = ["<|begin_of_text|>"] if include_bos else []
     for message in messages:
         role = message.get("role") or "user"
         content = (message.get("content") or "").strip()
@@ -421,6 +427,13 @@ def _complete_via_bitnet_cli(
     temperature: float,
     max_tokens: int,
 ) -> tuple[str, int, int]:
+    import tempfile
+
+    from autogpt.llm.providers.bitnet_cpp import (
+        ensure_cached_gguf,
+        path_unsafe_for_make,
+    )
+
     cli = find_bitnet_cli()
     if cli is None:
         raise FileNotFoundError("bitnet.cpp llama-cli/llama-completion not found")
@@ -433,62 +446,126 @@ def _complete_via_bitnet_cli(
             cli = sibling
 
     model = resolve_chat_model_path()
+    # USB paths with '#'/':' + mmap are a common segfault source on macOS.
+    if path_unsafe_for_make(model) or _env_bool("BITNET_CACHE_GGUF", True):
+        try:
+            model = ensure_cached_gguf(model)
+        except Exception as err:
+            logger.warn(f"BitNet GGUF cache copy skipped ({err})")
+
     prompt = apply_llama3_chat_template(messages, add_generation_prompt=True)
-    n_ctx = _env_int("BITNET_N_CTX", DEFAULT_N_CTX)
-    n_threads = _env_int("BITNET_N_THREADS", _default_threads())
+    # Conservative defaults: Apple Silicon + Metal/BLAS + large ubatch often SIGSEGV
+    # (exit -11) on i2_s. Prefer CPU + small batches.
+    n_ctx = _env_int("BITNET_N_CTX", 2048)
+    n_threads = min(_env_int("BITNET_N_THREADS", min(8, _default_threads())), 8)
+    n_batch = _env_int("BITNET_N_BATCH", 1)
+    n_ubatch = _env_int("BITNET_N_UBATCH", 1)
 
-    cmd = [
-        str(cli),
-        "-m",
-        str(model),
-        "-n",
-        str(max_tokens),
-        "-t",
-        str(n_threads),
-        "-c",
-        str(n_ctx),
-        "--temp",
-        str(temperature),
-        "-ngl",
-        str(_env_int("BITNET_N_GPU_LAYERS", 0)),
-        "-no-cnv",
-        "-p",
-        prompt,
-        "--no-display-prompt",
-    ]
-    if _env_bool("BITNET_CLI_JINJA", True):
-        cmd.append("--jinja")
-    # Stop at end-of-turn when the build supports it.
-    if _env_bool("BITNET_CLI_STOP", True):
-        cmd.extend(["--reverse-prompt", "<|eot_id|>"])
+    def _run(extra: list[str], *, use_jinja: bool) -> subprocess.CompletedProcess[str]:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as fh:
+            fh.write(prompt)
+            prompt_file = fh.name
+        cmd = [
+            str(cli),
+            "-m",
+            str(model),
+            "-n",
+            str(max_tokens),
+            "-t",
+            str(n_threads),
+            "-c",
+            str(n_ctx),
+            "-b",
+            str(n_batch),
+            "-ub",
+            str(n_ubatch),
+            "--temp",
+            str(max(0.0, temperature)),
+            "-ngl",
+            "0",
+            "--device",
+            "none",
+            "--fit",
+            "off",
+            "--no-mmap",
+            "-no-cnv",
+            "--override-kv",
+            "tokenizer.ggml.pre=str:llama-bpe",
+            "-f",
+            prompt_file,
+            "--no-display-prompt",
+            *extra,
+        ]
+        if use_jinja:
+            cmd.append("--jinja")
+        env = os.environ.copy()
+        env["GGML_METAL"] = "0"
+        env["LLAMA_ARG_N_GPU_LAYERS"] = "0"
+        try:
+            return subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=_env_int("BITNET_CLI_TIMEOUT", 600),
+                env=env,
+            )
+        finally:
+            try:
+                Path(prompt_file).unlink(missing_ok=True)
+            except Exception:
+                pass
 
-    env = os.environ.copy()
+    logger.debug(f"BitNet CLI: {cli.name} model={model} thr={n_threads} ctx={n_ctx}")
+    # Default: no jinja (custom LLaMA-3 prompt already applied).
+    use_jinja = _env_bool("BITNET_CLI_JINJA", False)
+    proc = _run([], use_jinja=use_jinja)
 
-    logger.debug(f"BitNet CLI: {' '.join(cmd[:8])} ...")
-    proc = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=_env_int("BITNET_CLI_TIMEOUT", 600),
-        env=env,
-    )
+    # Exit -11 = SIGSEGV. Retry once with even safer settings.
+    if proc.returncode in (-11, 139, 245) or (
+        proc.returncode != 0 and "Segmentation" in ((proc.stderr or "") + (proc.stdout or ""))
+    ):
+        logger.warn(
+            f"{Fore.YELLOW}bitnet.cpp crashed (code {proc.returncode}); "
+            f"retrying CPU/gemv-safe settings{Fore.RESET}"
+        )
+        n_ctx = min(n_ctx, 1024)
+        n_threads = min(n_threads, 4)
+        n_batch = 1
+        n_ubatch = 1
+        proc = _run([], use_jinja=False)
+
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip()
         raise RuntimeError(f"bitnet.cpp failed (code {proc.returncode}): {err[:800]}")
 
-    # llama-completion prints sampler logs to stdout; keep the last non-log chunk.
+    # llama-completion prints sampler logs to stdout; keep generation lines only.
     raw = (proc.stdout or "").strip()
     content_lines = [
         ln
         for ln in raw.splitlines()
         if ln.strip()
+        and not re.match(r"^\d+\.\d+", ln.strip())
         and not ln.strip().startswith("common_perf_print")
         and "sampler " not in ln
         and "system_info:" not in ln
         and "generate:" not in ln
+        and not ln.lstrip().startswith("repeat_")
+        and not ln.lstrip().startswith("dry_")
+        and not ln.lstrip().startswith("top_")
+        and not ln.lstrip().startswith("mirostat")
+        and "llama_completion:" not in ln
+        and "print_info:" not in ln
     ]
     content = _strip_special_tokens("\n".join(content_lines) if content_lines else raw)
+    # Drop pure-punctuation garbage runs from broken tokenizer/kernels.
+    if content and set(content) <= set("@Gg \n"):
+        logger.warn(
+            "BitNet returned placeholder garbage (@/G). Known issue with some "
+            "bitnet.cpp builds / i2_s kernels; try rebuilding BitNet or smaller -b 1."
+        )
     prompt_tokens = tokenize_count(prompt)
     completion_tokens = tokenize_count(content) if content else 0
     return content, prompt_tokens, completion_tokens

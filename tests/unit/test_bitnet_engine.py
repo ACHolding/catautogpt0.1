@@ -14,7 +14,8 @@ def test_llama3_chat_template_includes_roles_and_generation_prompt():
             {"role": "user", "content": "Hi"},
         ]
     )
-    assert prompt.startswith("<|begin_of_text|>")
+    # BOS omitted by default (llama-completion injects it).
+    assert "<|begin_of_text|>" not in prompt
     assert "<|start_header_id|>system<|end_header_id|>" in prompt
     assert "You are helpful." in prompt
     assert "<|start_header_id|>user<|end_header_id|>" in prompt

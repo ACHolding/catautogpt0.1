@@ -38,6 +38,35 @@ def path_unsafe_for_make(path: Path | str) -> bool:
     return any(ch in str(path) for ch in "#:")
 
 
+def ensure_cached_gguf(gguf: Path) -> Path:
+    """Copy GGUF off USB / odd paths into ``~/.cache`` for stable mmap-free loads.
+
+    Paths containing ``#`` or ``:`` (this project's USB volume) are associated with
+    bitnet.cpp SIGSEGVs during Metal/mmap init.
+    """
+    gguf = Path(gguf).expanduser().resolve()
+    if not gguf.is_file():
+        raise FileNotFoundError(gguf)
+    if not path_unsafe_for_make(gguf) and not _env_bool("BITNET_FORCE_CACHE_GGUF", False):
+        return gguf
+
+    cache_dir = Path.home() / ".cache" / "catautogpt" / "models"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    dest = cache_dir / gguf.name
+    if dest.is_file() and dest.stat().st_size == gguf.stat().st_size:
+        return dest
+
+    logger.typewriter_log(
+        "BitNet: ",
+        Fore.YELLOW,
+        f"caching GGUF to {dest} (stable path for inference)…",
+    )
+    tmp = dest.with_suffix(dest.suffix + ".partial")
+    shutil.copy2(gguf, tmp)
+    tmp.replace(dest)
+    return dest
+
+
 def default_bitnet_home() -> Path:
     home = os.getenv("BITNET_HOME")
     if home and home.strip():
@@ -133,6 +162,33 @@ def _patch_src1_cont(home: Path) -> None:
     logger.typewriter_log("BitNet: ", Fore.YELLOW, "patched ggml-cpu.c src1_cont scope bug")
 
 
+def _patch_bitnet_relu_sqr(home: Path) -> None:
+    """Recent BitNet llama.cpp uses SILU for b1.58 FFN; correct activation is ReLU²."""
+    path = home / "3rdparty" / "llama.cpp" / "src" / "models" / "bitnet.cpp"
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if "LLM_FFN_RELU_SQR, LLM_FFN_PAR, il);" in text:
+        return
+    needle = (
+        "        cur = build_ffn(cur,\n"
+        "                model.layers[il].ffn_up,   NULL, model.layers[il].ffn_up_s,\n"
+        "                model.layers[il].ffn_gate, NULL, model.layers[il].ffn_gate_s,\n"
+        "                NULL,                      NULL, NULL,\n"
+        "                NULL,\n"
+        "                LLM_FFN_SILU, LLM_FFN_PAR, il);"
+    )
+    if needle not in text:
+        return
+    path.write_text(
+        text.replace(needle, needle.replace("LLM_FFN_SILU", "LLM_FFN_RELU_SQR"), 1),
+        encoding="utf-8",
+    )
+    logger.typewriter_log(
+        "BitNet: ", Fore.YELLOW, "patched bitnet.cpp FFN SILU → ReLU²"
+    )
+
+
 def _ninja_path() -> str | None:
     for candidate in ("/opt/homebrew/bin/ninja", shutil.which("ninja")):
         if candidate and Path(candidate).is_file():
@@ -143,6 +199,7 @@ def _ninja_path() -> str | None:
 def _cmake_build_fallback(home: Path, env: dict[str, str]) -> None:
     """Build bitnet.cpp with Ninja + static libs (shared dylib link fails for i2_s)."""
     _patch_src1_cont(home)
+    _patch_bitnet_relu_sqr(home)
     build = home / "build"
     if build.exists():
         shutil.rmtree(build)
