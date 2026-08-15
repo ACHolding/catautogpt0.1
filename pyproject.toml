@@ -9,9 +9,10 @@ authors = [
   { name="Torantulino", email="support@agpt.co" },
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
@@ -23,7 +24,7 @@ description = "An open-source attempt to make GPT-4 autonomous"
 
 [tool.black]
 line-length = 88
-target-version = ['py310']
+target-version = ['py314']
 include = '\.pyi?$'
 packages = ["autogpt"]
 extend-exclude = '.+/(dist|.venv|venv|build)/.+'
