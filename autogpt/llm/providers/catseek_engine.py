@@ -281,6 +281,18 @@ def _complete_raw(
     return content, prompt_tokens, completion_tokens
 
 
+def _strip_markdown_fence(content: str) -> str:
+    text = (content or "").strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
 def create_chat_completion_raw(
     messages: Sequence[dict[str, str]],
     *,
@@ -343,6 +355,9 @@ def create_chat_completion_raw(
                 )
 
     content = _strip_think(content)
+    # Prefer bare JSON for Auto-GPT's agent loop (models often wrap in ```json).
+    if content.startswith("```"):
+        content = _strip_markdown_fence(content)
     latency_s = round(time.time() - t0, 3)
 
     _append_trace(
@@ -369,12 +384,10 @@ def create_chat_completion_raw(
         pass
 
     if latency_s >= 8.0:
-        logger.typewriter_log(
-            "CatSeek-GPU: ",
-            Fore.YELLOW,
-            f"slow reply {latency_s:.1f}s · tokens={completion_tokens} · "
-            f"fast={'on' if fast else 'off'} (set CATSEEK_FAST=True / "
-            f"CATSEEK_MAX_TOKENS={DEFAULT_MAX_TOKENS})",
+        logger.warn(
+            f"CatSeek-GPU slow reply {latency_s:.1f}s · tokens={completion_tokens} · "
+            f"fast={'on' if fast else 'off'} "
+            f"(CATSEEK_FAST=True / CATSEEK_MAX_TOKENS={DEFAULT_MAX_TOKENS})"
         )
 
     return SimpleNamespace(
