@@ -74,3 +74,32 @@ def test_count_string_tokens_gpt_4():
         assert count >= 1
     else:
         assert count == 4
+
+
+def test_count_message_tokens_catseek_models():
+    """CatSeek / DeepSeek local model ids must not raise NotImplementedError."""
+    messages = [
+        Message("user", "Hello"),
+        Message("assistant", "Hi there!"),
+    ]
+    for model in ("catseek-gpu-0.1", "catseek", "deepseek-r1-14b"):
+        count = count_message_tokens(messages, model=model)
+        assert count >= 5
+
+
+def test_count_string_tokens_catseek_models():
+    string = "Hello, world!"
+    for model in ("catseek-gpu-0.1", "catseek", "deepseek-r1-14b"):
+        count = count_string_tokens(string, model_name=model)
+        assert count >= 1
+
+
+def test_chat_sequence_token_length_catseek():
+    from autogpt.llm.base import ChatSequence
+
+    seq = ChatSequence.for_model(
+        "catseek-gpu-0.1",
+        [Message("system", "sys"), Message("user", "do the thing")],
+    )
+    assert seq.token_length > 0
+

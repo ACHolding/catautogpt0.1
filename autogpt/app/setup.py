@@ -83,7 +83,7 @@ def prompt_user(
                 "Falling back to manual mode.",
                 speak_text=True,
             )
-            logger.debug(f"Error during AIConfig generation: {e}")
+            logger.warn(f"Error during AIConfig generation: {type(e).__name__}: {e}")
 
             return generate_aiconfig_manual(config)
 
@@ -196,6 +196,45 @@ def generate_aiconfig_manual(
     return AIConfig(ai_name, ai_role, ai_goals, api_budget)
 
 
+def _parse_aiconfig_output(output: str) -> AIConfig:
+    """Parse Name / Description / Goals from an LLM AIConfig reply."""
+    text = (output or "").strip()
+    if not text:
+        raise ValueError("AIConfig generator returned empty output")
+
+    # Drop residual DeepSeek think blocks if strip missed them upstream.
+    if "</think>" in text:
+        text = text.split("</think>", 1)[-1].strip()
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+
+    name_match = re.search(r"(?:^|\n)\s*Name(?:\s*)[:：](?:\s*)(.+)", text, re.IGNORECASE)
+    role_match = re.search(
+        r"(?:^|\n)\s*Description(?:\s*)[:：](?:\s*)(.*?)(?:(?:\n)\s*Goals?\b|\Z)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not name_match or not role_match:
+        raise ValueError(
+            "AIConfig generator output missing Name/Description fields: "
+            f"{text[:240]!r}"
+        )
+
+    ai_name = name_match.group(1).strip().strip("*`\"'")
+    ai_role = role_match.group(1).strip().strip("*`\"'")
+    ai_goals = [
+        g.strip().strip("*`\"'")
+        for g in re.findall(r"(?<=\n)\s*[-•]\s*(.+)", text)
+        if g.strip()
+    ]
+    if not ai_name or not ai_role or not ai_goals:
+        raise ValueError(
+            "AIConfig generator produced incomplete Name/Description/Goals: "
+            f"{text[:240]!r}"
+        )
+
+    return AIConfig(ai_name, ai_role, ai_goals[:5], 0.0)
+
+
 def generate_aiconfig_automatic(user_prompt: str, config: Config) -> AIConfig:
     """Generates an AIConfig object from the given string.
 
@@ -217,23 +256,11 @@ def generate_aiconfig_automatic(user_prompt: str, config: Config) -> AIConfig:
             ],
         ),
         config,
+        temperature=0.1,
+        max_tokens=768,
     ).content
 
     # Debug LLM Output
     logger.debug(f"AI Config Generator Raw Output: {output}")
 
-    # Parse the output
-    ai_name = re.search(r"Name(?:\s*):(?:\s*)(.*)", output, re.IGNORECASE).group(1)
-    ai_role = (
-        re.search(
-            r"Description(?:\s*):(?:\s*)(.*?)(?:(?:\n)|Goals)",
-            output,
-            re.IGNORECASE | re.DOTALL,
-        )
-        .group(1)
-        .strip()
-    )
-    ai_goals = re.findall(r"(?<=\n)-\s*(.*)", output)
-    api_budget = 0.0  # TODO: parse api budget using a regular expression
-
-    return AIConfig(ai_name, ai_role, ai_goals, api_budget)
+    return _parse_aiconfig_output(output or "")

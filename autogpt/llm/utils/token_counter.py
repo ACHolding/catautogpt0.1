@@ -12,6 +12,20 @@ def _is_bitnet_model(model: str) -> bool:
     return model.startswith("bitnet")
 
 
+def _is_catseek_model(model: str) -> bool:
+    lowered = model.lower()
+    return (
+        lowered.startswith("catseek")
+        or lowered.startswith("deepseek")
+        or lowered in {"catseek-gpu", "catseek-gpu-0.1", "deepseek-r1-14b"}
+    )
+
+
+def _is_chatml_local_model(model: str) -> bool:
+    """Local ChatML GGUF backends that share gpt-3.5-style token estimates."""
+    return _is_bitnet_model(model) or _is_catseek_model(model)
+
+
 @overload
 def count_message_tokens(messages: Message, model: str = "gpt-3.5-turbo") -> int:
     ...
@@ -43,7 +57,25 @@ def count_message_tokens(
             # Fall through to tiktoken estimate if the GGUF is not loaded yet.
             pass
 
-    if model.startswith("gpt-3.5-turbo") or model.startswith("bitnet"):
+    if _is_catseek_model(model):
+        try:
+            from autogpt.llm.providers import catseek_engine
+
+            # Prefer real llama.cpp tokenization when the GGUF is warm.
+            llm = getattr(catseek_engine, "_chat_llm", None)
+            if llm is not None:
+                prompt = catseek_engine.apply_deepseek_chat_template(
+                    [{"role": m.role, "content": m.content or ""} for m in messages],
+                    add_generation_prompt=True,
+                )
+                return len(llm.tokenize(prompt.encode("utf-8"), add_bos=True))
+        except Exception:
+            pass
+
+    if (
+        model.startswith("gpt-3.5-turbo")
+        or _is_chatml_local_model(model)
+    ):
         tokens_per_message = (
             4  # every message follows <|start|>{role/name}\n{content}<|end|>\n
         )
@@ -89,6 +121,19 @@ def count_string_tokens(string: str, model_name: str) -> int:
             return bitnet_engine.tokenize_count(string)
         except Exception:
             return max(1, len(string) // 4)
+
+    if _is_catseek_model(model_name):
+        if string == "":
+            return 0
+        try:
+            from autogpt.llm.providers import catseek_engine
+
+            llm = getattr(catseek_engine, "_chat_llm", None)
+            if llm is not None:
+                return len(llm.tokenize(string.encode("utf-8"), add_bos=False))
+        except Exception:
+            pass
+        return max(1, len(string) // 4)
 
     try:
         encoding = tiktoken_lib.encoding_for_model(model_name)
