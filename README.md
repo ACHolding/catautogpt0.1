@@ -37,7 +37,7 @@ Demo made by <a href=https://twitter.com/BlakeWerlinger>Blake Werlinger</a>
 ## Quickstart
 
 0. Check out the [wiki](https://github.com/Significant-Gravitas/Nexus/wiki)
-1. Download a BitNet GGUF (`./scripts/setup_bitnet.sh`) and set `BITNET_MODEL_PATH` in `.env`
+1. Download a BitNet GGUF (`./scripts/setup_bitnet.sh` or just run — auto-bakes on first start) and set `BITNET_MODEL_PATH` in `.env`
 2. Install dependencies (`pip install -r requirements.txt`, including `llama-cpp-python`)
 3. Follow the [installation instructions][docs/setup]
 4. Configure any additional features you want, or install some [plugins][docs/plugins]
